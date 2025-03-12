@@ -1,0 +1,17 @@
+name: ploidex
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python>=3.8
+  - numpy
+  - scipy
+  - pandas
+  - anndata
+  - matplotlib
+  - seaborn
+  - pytest
+  - pip
+  - pip:
+    - -e .

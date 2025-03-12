@@ -1,0 +1,17 @@
+pycache/
+*.py[cod]
+*$py.class
+dist/
+build/
+*.egg-info/
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+.env
+.venv
+env/
+venv/
+ENV/

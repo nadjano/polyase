@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+import scipy.sparse
 
 class AlleleRatioCalculator:
     """
@@ -32,7 +33,8 @@ class AlleleRatioCalculator:
         
     def calculate_ratios(self, counts_layer='unique_counts', output_suffix=None):
         """
-        Calculate allelic ratios for each transcript grouped by Synt_id.
+        Calculate allelic ratios for each transcript grouped by Synt_id,
+        computing ratios independently for each column (gene/feature).
         
         Parameters:
         -----------
@@ -57,30 +59,45 @@ class AlleleRatioCalculator:
         if counts_layer not in self.adata.layers:
             raise ValueError(f"Layer '{counts_layer}' not found")
         
-        # Get unique Synt_ids
-        unique_synt_ids = pd.unique(self.adata.obsm['Synt_id'])
+        # Get counts array and check if it's sparse
+        counts = self.adata.layers[counts_layer]
+        is_sparse = scipy.sparse.issparse(counts)
         
-        # Initialize ratio array with zeros
-        ratio_matrix = np.zeros_like(self.adata.layers[counts_layer], dtype=float)
+        # Get unique Synt_ids, excluding 0 and None
+        synt_ids = self.adata.obsm['Synt_id']
+        valid_synt_ids = pd.unique(synt_ids[(synt_ids != 0) & (~pd.isna(synt_ids))])
+        
+        # Initialize ratio matrix with zeros - always use dense array for results
+        ratio_matrix = np.zeros(self.adata.shape, dtype=float)
         
         # Calculate ratios for each Synt_id group
-        for synt_id in unique_synt_ids:
-            # Skip groups with Synt_id = 0 or None if needed
-            if synt_id == 0 or synt_id is None:
-                continue
-                
+        for synt_id in valid_synt_ids:
             # Create mask for current Synt_id
-            mask = self.adata.obsm['Synt_id'] == synt_id
+            mask = synt_ids == synt_id
+            mask_indices = np.where(mask)[0]
             
             # Get counts for this group
-            group_counts = self.adata.layers[counts_layer][mask]
+            if is_sparse:
+                # For sparse matrices, extract the rows as a dense array
+                group_counts = counts[mask_indices].toarray()
+            else:
+                group_counts = counts[mask_indices]
             
-            # Calculate total counts for this Synt_id
-            total_counts = np.sum(group_counts)
+            # Calculate column sums for this Synt_id (sum for each gene/feature)
+            column_totals = np.sum(group_counts, axis=0)
             
-            # Calculate ratio if total_counts > 0
-            if total_counts > 0:
-                ratio_matrix[mask] = self.adata.layers[counts_layer][mask] / total_counts
+            # Only process columns with non-zero totals
+            non_zero_cols = column_totals > 0
+            
+            # Vectorized calculation for all rows in this group
+            if np.any(non_zero_cols):
+                # Broadcasting division for all rows in the group at once
+                group_ratios = np.zeros_like(group_counts, dtype=float)
+                group_ratios[:, non_zero_cols] = group_counts[:, non_zero_cols] / column_totals[non_zero_cols]
+                
+                # Assign results back to the ratio matrix
+                for i, idx in enumerate(mask_indices):
+                    ratio_matrix[idx] = group_ratios[i]
         
         # Determine output layer name
         suffix = output_suffix or counts_layer

@@ -21,7 +21,7 @@ jedi
 jupyter_client
 jupyter_core
 kiwisolver
-matplotlib==3.10.1
+matplotlib==3.9
 matplotlib-inline
 munkres==1.1.4
 natsort

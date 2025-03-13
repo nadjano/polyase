@@ -1,4 +1,4 @@
-anndata @ file:///home/conda/feedstock_root/build_artifacts/anndata_1736758422405/work
+anndata
 array_api_compat @ file:///home/conda/feedstock_root/build_artifacts/array-api-compat_1741126920022/work
 asttokens @ file:///home/conda/feedstock_root/build_artifacts/asttokens_1733250440834/work
 cached-property @ file:///home/conda/feedstock_root/build_artifacts/cached_property_1615209429212/work

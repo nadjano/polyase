@@ -11,5 +11,6 @@ __author__ = "Nadja Nolte"
 
 from .allele_utils import AlleleRatioCalculator, calculate_allelic_ratios
 from .multimapping import MultimappingRatioCalculator, calculate_multi_ratios
+from .filter import FlexibleGroupFilter, filter_low_expression
 
-__all__ = ["AlleleRatioCalculator", "calculate_allelic_ratios", "MultimappingRatioCalculator", "calculate_multi_ratios"]
+__all__ = ["AlleleRatioCalculator", "calculate_allelic_ratios", "MultimappingRatioCalculator", "calculate_multi_ratios", "FlexibleGroupFilter", "filter_low_expression"]

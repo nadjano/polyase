@@ -120,7 +120,7 @@ class MultimappingRatioCalculator:
 
 def calculate_multi_ratios(adata, unique_layer='unique_counts', multi_layer='ambiguous_counts'):
     """
-    Calculatemultimappingratios for each transcript grouped by Synt_id.
+    Calculat emultimapping ratios for each transcript grouped by Synt_id.
     
     Parameters:
     -----------

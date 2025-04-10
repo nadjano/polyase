@@ -13,5 +13,6 @@ from .allele_utils import AlleleRatioCalculator, calculate_allelic_ratios
 from .multimapping import MultimappingRatioCalculator, calculate_multi_ratios
 from .filter import filter_low_expression
 from .plotting import plot_allelic_ratios, plot_allelic_ratios_comparison
+from .ase_data_loader import load_ase_data
 
-__all__ = ["AlleleRatioCalculator", "calculate_allelic_ratios", "MultimappingRatioCalculator", "calculate_multi_ratios", "filter_low_expression", "plot_allelic_ratios", "plot_allelic_ratios_comparison"]
+__all__ = ["AlleleRatioCalculator", "calculate_allelic_ratios", "MultimappingRatioCalculator", "calculate_multi_ratios", "filter_low_expression", "plot_allelic_ratios", "plot_allelic_ratios_comparison", "load_ase_data"]

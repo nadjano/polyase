@@ -334,7 +334,7 @@ def filter_low_expression(adata, min_expression=1.0, counts_layer='unique_counts
     """
     Filter transcripts with low expression based on synteny groups.
     
-    Parameters:
+    Parameters
     -----------
     adata : AnnData
         AnnData object containing transcript data
@@ -349,7 +349,7 @@ def filter_low_expression(adata, min_expression=1.0, counts_layer='unique_counts
         'all': Keep groups that pass threshold in all samples/features
         'mean': Keep groups that pass threshold on average across samples/features
         
-    Returns:
+    Returns
     --------
     adata : AnnData
         Filtered AnnData object

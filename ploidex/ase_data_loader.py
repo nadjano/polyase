@@ -33,7 +33,7 @@ def load_ase_data(
         AnnData object containing the processed data
     """
     # Load variant observations file
-    var_obs = pd.read_csv(var_obs_file, delimiter="\t")
+    var_obs = pd.read_csv(var_obs_file, delimiter="\t", index_col=0)
     
     # Load additional counts file if provided
     if counts_file:
@@ -92,30 +92,28 @@ def load_ase_data(
     # Fill NA values
     unique_counts.fillna(fillna, inplace=True)
     ambig_counts.fillna(fillna, inplace=True)
+
+
     
     # Merge variant observations with counts
-    var_obs = var_obs.merge(unique_counts, left_on="transcript_id", right_index=True, how="right")
-    
-    # Create dictionary array for obsm
-    df_dict_array = {col: var_obs[col].to_numpy() for col in var_obs.columns}
+    var_obs = var_obs.merge(unique_counts, left_index=True, right_index=True, how="right")
     
     # Create AnnData object
     adata = ad.AnnData(
-        X=unique_counts[sample_ids],
-        obs=pd.DataFrame(index=unique_counts.index),
-        var=pd.DataFrame(index=sample_ids),
-        obsm=df_dict_array,
+        X=unique_counts[sample_ids].T,
+        var=var_obs,
+        obs=pd.DataFrame(index=sample_ids),
     )
     
     # Add conditions to var
     conditions = [sample_info[sample_id] for sample_id in sample_ids]
-    adata.var["condition"] = conditions
+    adata.obs["condition"] = conditions
     
     # Add sample IDs to var_names
-    adata.var_names = sample_ids
+    adata.obs_names = sample_ids
     
     # Add layers of unique and ambiguous counts
-    adata.layers["unique_counts"] = unique_counts.to_numpy()
-    adata.layers["ambiguous_counts"] = ambig_counts.to_numpy()
+    adata.layers["unique_counts"] = unique_counts.T.to_numpy()
+    adata.layers["ambiguous_counts"] = ambig_counts.T.to_numpy()
     
     return adata

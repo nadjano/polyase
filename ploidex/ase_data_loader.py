@@ -95,9 +95,9 @@ def load_ase_data(
 
 
     
-    # Merge variant observations with counts
+    # Merge variant observations with counts to get the right index
     var_obs = var_obs.merge(unique_counts, left_index=True, right_index=True, how="right")
-    
+    var_obs.drop(sample_ids, axis=1, inplace=True)
     # Create AnnData object
     adata = ad.AnnData(
         X=unique_counts[sample_ids].T,

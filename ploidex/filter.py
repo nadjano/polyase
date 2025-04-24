@@ -57,7 +57,7 @@ def filter_by_group_expression(
     min_expression: Union[float, Dict[str, float]] = 1.0,
     layer: Optional[str] = None,
     group_col: str = 'Synt_id',
-    group_source: str = 'obsm',
+    group_source: str = 'var',
     mode: str = 'any',
     return_dropped: bool = False,
     copy: bool = True,
@@ -79,7 +79,7 @@ def filter_by_group_expression(
         Layer to use for expression values. If None, use .X
     group_col : str, default='Synt_id'
         Column name containing group IDs
-    group_source : str, default='obsm'
+    group_source : str, default='var'
         Location of the group column in AnnData ('obs', 'var', 'obsm', 'varm')
     mode : str, default='any'
         'any': Keep groups that pass threshold in any sample/feature

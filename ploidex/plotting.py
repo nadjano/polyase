@@ -283,3 +283,162 @@ def plot_allelic_ratios_comparison(
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
     
     #return fig
+
+def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=None, jitter=0.2, alpha=0.7, ylim=(0, 1), sort_by='p_value', output_file=None):
+    """
+    Plot the top n syntelogs with differential allelic ratios.
+    
+    Parameters
+    -----------
+    results_df : pd.DataFrame
+        Results dataframe from test_allelic_ratios function
+    n : int, optional
+        Number of top syntelogs to plot (default: 5)
+    figsize : tuple, optional
+        Figure size as (width, height) in inches (default: (12, 4*5))
+    palette : dict or None, optional
+        Color palette for conditions (default: None, uses seaborn defaults)
+    jitter : float, optional
+        Amount of jitter for strip plot (default: 0.2)
+    alpha : float, optional
+        Transparency of points (default: 0.7)
+    ylim : tuple, optional
+        Y-axis limits (default: (0, 1))
+    sort_by : str, optional
+        Column to sort results by ('p_value', 'FDR', or 'ratio_difference') (default: 'p_value')
+    output_file : str, optional
+        Path to save the figure (default: None, displays figure but doesn't save)
+        
+    Returns
+    --------
+    fig : matplotlib.figure.Figure
+        The generated figure
+    """
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import pandas as pd
+    import numpy as np
+    
+    if len(results_df) == 0:
+        print("No results to plot")
+        return None
+    
+    # Validate sort_by parameter
+    if sort_by not in ['p_value', 'FDR', 'ratio_difference']:
+        print(f"Invalid sort_by parameter '{sort_by}'. Using 'p_value' instead.")
+        sort_by = 'p_value'
+    
+    # Ensure FDR column exists
+    if 'FDR' not in results_df.columns and sort_by == 'FDR':
+        print("FDR column not found. Using p_value for sorting.")
+        sort_by = 'p_value'
+    
+    # Ensure ratio_difference column exists
+    if 'ratio_difference' not in results_df.columns and sort_by == 'ratio_difference':
+        print("ratio_difference column not found. Using p_value for sorting.")
+        sort_by = 'p_value'
+    
+    # Get the condition names
+    condition_columns = [col for col in results_df.columns if col.startswith('ratios_rep_')]
+    if not condition_columns:
+        print("No ratio columns found in dataframe")
+        return None
+    
+    conditions = [col.replace('ratios_rep_', '') for col in condition_columns]
+    
+    # Get top n syntelogs with lowest p-values
+    top_syntelogs = results_df.sort_values(sort_by).drop_duplicates('Synt_id').head(n)['Synt_id'].unique()
+    
+    # Filter results to include only these syntelogs
+    top_results = results_df[results_df['Synt_id'].isin(top_syntelogs)]
+    
+    # Create the figure
+    fig, axes = plt.subplots(len(top_syntelogs), 1, figsize=figsize)
+    # Handle case where there's only one syntelog
+    if len(top_syntelogs) == 1:
+        axes = [axes]
+    
+    # Plot each syntelog
+    for i, synt_id in enumerate(top_syntelogs):
+        # Get data for this syntelog
+        synt_data = top_results[top_results['Synt_id'] == synt_id].copy()
+        
+        # Sort by allele for better visualization
+        synt_data = synt_data.sort_values('allele')
+        
+        # Get stats for this syntelog (take first row since they're the same for all replicates)
+        p_value = synt_data['p_value'].iloc[0]
+        fdr = synt_data['FDR'].iloc[0] if 'FDR' in synt_data.columns else np.nan
+        n_alleles = synt_data['n_alleles'].iloc[0]
+        
+        # Reshape data for seaborn
+        synt_data_melted = pd.melt(
+            synt_data, 
+            id_vars=['Synt_id', 'allele', 'transcript_id', 'replicate'], 
+            value_vars=condition_columns,
+            var_name='condition', 
+            value_name='ratio'
+        )
+        
+        # Clean up condition names
+        synt_data_melted['condition'] = synt_data_melted['condition'].str.replace('ratios_rep_', '')
+        
+        # Create the stripplot
+        ax = axes[i]
+        sns.stripplot(
+            x='allele', 
+            y='ratio', 
+            hue='condition', 
+            data=synt_data_melted, 
+            jitter=jitter, 
+            alpha=alpha,
+            palette=palette,
+            ax=ax
+        )
+        
+        # Add mean values as horizontal lines for each allele and condition
+        for allele in synt_data['allele'].unique():
+            for j, cond in enumerate(conditions):
+                mean_col = f'ratios_{cond}_mean'
+                if mean_col in synt_data.columns:
+                    mean_val = synt_data[synt_data['allele'] == allele][mean_col].iloc[0]
+                    allele_pos = list(synt_data['allele'].unique()).index(allele)
+                    ax.hlines(
+                        y=mean_val, 
+                        xmin=allele_pos-0.2, 
+                        xmax=allele_pos+0.2, 
+                        colors=ax.get_legend().get_lines()[j].get_color(),
+                        linewidth=2
+                    )
+        
+        # Set title and labels
+        fdr_text = f", FDR = {fdr:.2e}" if not np.isnan(fdr) else ""
+        ax.set_title(f"Syntelog {synt_id} (p = {p_value:.2e}{fdr_text}, {n_alleles} alleles)")
+        ax.set_xlabel('Allele')
+        ax.set_ylabel('Expression Ratio')
+        
+        # Set y-limits
+        ax.set_ylim(ylim)
+        
+        # Adjust legend
+        ax.legend(title='Condition')
+        
+        # Add transcript IDs as annotations
+        for j, allele in enumerate(synt_data['allele'].unique()):
+            transcript = synt_data[synt_data['allele'] == allele]['transcript_id'].iloc[0]
+            ax.annotate(
+                f"{transcript}", 
+                xy=(j, ylim[0] + 0.05), 
+                ha='center', 
+                fontsize=8,
+                alpha=0.7,
+                rotation=45
+            )
+    
+    plt.tight_layout()
+    
+    # Save figure if requested
+    if output_file:
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    
+    return fig

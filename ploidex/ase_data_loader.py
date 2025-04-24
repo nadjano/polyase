@@ -84,20 +84,15 @@ def load_ase_data(
     # Concatenate unique counts across samples
     unique_counts = pd.concat(unique_counts_dfs, axis=1)
     unique_counts = unique_counts.loc[~unique_counts.index.duplicated(keep='first')]
-    
+
     # Rename columns
     ambig_counts.columns = sample_ids
     unique_counts.columns = sample_ids
-    
-    # Fill NA values
-    unique_counts.fillna(fillna, inplace=True)
-    ambig_counts.fillna(fillna, inplace=True)
 
+    # Reidex to also have the transcrits that where not maped
+    ambig_counts = ambig_counts.reindex(var_obs.index, fill_value=fillna)
+    unique_counts = unique_counts.reindex(var_obs.index, fill_value=fillna)
 
-    
-    # Merge variant observations with counts to get the right index
-    var_obs = var_obs.merge(unique_counts, left_index=True, right_index=True, how="right")
-    var_obs.drop(sample_ids, axis=1, inplace=True)
     # Create AnnData object
     adata = ad.AnnData(
         X=unique_counts[sample_ids].T,

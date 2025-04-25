@@ -61,7 +61,7 @@ def filter_by_group_expression(
     mode: str = 'any',
     return_dropped: bool = False,
     copy: bool = True,
-    filter_axis: Literal[0, 1] = 0,  # 0 = filter rows, 1 = filter columns
+    filter_axis: Literal[0, 1] = 1,  # 1 = filter rows, 0 = filter columns
     verbose: bool = True
 ) -> Union[ad.AnnData, Tuple[ad.AnnData, List[str]]]:
     """
@@ -91,8 +91,8 @@ def filter_by_group_expression(
         If True, return a copy of the filtered AnnData object
         If False, filter the AnnData object in place
     filter_axis : int, default=0
-        0: Filter rows (obs) based on group expression across columns (var)
-        1: Filter columns (var) based on group expression across rows (obs)
+        1: Filter rows (obs) based on group expression across columns (var)
+        0: Filter columns (var) based on group expression across rows (obs)
     verbose : bool, default=True
         Whether to print additional information during filtering
         
@@ -148,11 +148,11 @@ def filter_by_group_expression(
         threshold_dim = adata.obs_names
         
     else:
-        raise ValueError("filter_axis must be 0 (filter rows) or 1 (filter columns)")
+        raise ValueError("filter_axis must be 1 (filter rows) or 0 (filter columns)")
     
     # Group by group ID and sum expression
     grouped_expr = expr_df.groupby('group').sum()
-    
+
     # Convert threshold to dictionary if it's a scalar
     if isinstance(min_expression, (int, float)):
         min_expression = {sample: min_expression for sample in threshold_dim}
@@ -221,9 +221,9 @@ def get_group_expression(
     adata: ad.AnnData,
     layer: Optional[str] = None,
     group_col: str = 'Synt_id',
-    group_source: str = 'obsm',
+    group_source: str = 'var',
     normalize: bool = False,
-    axis: Literal[0, 1] = 0  # 0 = group rows, 1 = group columns
+    axis: Literal[0, 1] = 1  # 0 = group rows, 1 = group columns
 ) -> pd.DataFrame:
     """
     Calculate the expression of each group across samples or features.
@@ -236,13 +236,13 @@ def get_group_expression(
         Layer to use for expression values. If None, use .X
     group_col : str, default='Synt_id'
         Column name containing group IDs
-    group_source : str, default='obsm'
+    group_source : str, default='var'
         Location of the group column in AnnData ('obs', 'var', 'obsm', 'varm')
     normalize : bool, default=False
         If True, normalize expression values by number of elements per group
     axis : int, default=0
-        0: Group rows (obs) and calculate expression across columns (var)
-        1: Group columns (var) and calculate expression across rows (obs)
+        1: Group rows (obs) and calculate expression across columns (var)
+        0: Group columns (var) and calculate expression across rows (obs)
         
     Returns
     -------
@@ -297,7 +297,7 @@ def get_group_expression(
 def summarize_groups(
     adata: ad.AnnData,
     group_col: str = 'Synt_id',
-    group_source: str = 'obsm',
+    group_source: str = 'var',
 ) -> pd.DataFrame:
     """
     Summarize groups in the AnnData object.
@@ -308,7 +308,7 @@ def summarize_groups(
         AnnData object with group IDs
     group_col : str, default='Synt_id'
         Column name containing group IDs
-    group_source : str, default='obsm'
+    group_source : str, default='var'
         Location of the group column in AnnData ('obs', 'var', 'obsm', 'varm')
         
     Returns
@@ -359,6 +359,6 @@ def filter_low_expression(adata, min_expression=1.0, counts_layer='unique_counts
         min_expression=min_expression, 
         layer=counts_layer,
         group_col=group_col, 
-        group_source='obsm',
+        group_source='var',
         mode=mode
     )

@@ -49,9 +49,9 @@ class MultimappingRatioCalculator:
         if self.adata is None:
             raise ValueError("No AnnData object has been set")
             
-        # Make sure Synt_id is in obsm
-        if 'Synt_id' not in self.adata.obsm:
-            raise ValueError("'Synt_id' not found in obsm")
+        # Make sure Synt_id is in var
+        if 'Synt_id' not in self.adata.var:
+            raise ValueError("'Synt_id' not found in var")
         
         # Get counts from specified layer
         if multi_layer not in self.adata.layers:
@@ -61,11 +61,11 @@ class MultimappingRatioCalculator:
             raise ValueError(f"Layer '{unique_layer}' not found")
         
         # Get unique Synt_ids
-        unique_synt_ids = pd.unique(self.adata.obsm['Synt_id'])
+        unique_synt_ids = pd.unique(self.adata.var['Synt_id'])
         
         # Initialize ratio array with zeros
-        ratio_matrix = np.zeros_like(self.adata.layers[multi_layer], dtype=float)
-        
+        #ratio_matrix = np.zeros_like(self.adata.layers[multi_layer], dtype=float)
+        multi_ratio = np.zeros(self.adata.shape[1], dtype=float)
         # Calculate ratios for each Synt_id group
         for synt_id in unique_synt_ids:
             # Skip groups with Synt_id = 0 or None if needed
@@ -73,11 +73,11 @@ class MultimappingRatioCalculator:
                 continue
                 
             # Create mask for current Synt_id
-            mask = self.adata.obsm['Synt_id'] == synt_id
+            mask = self.adata.var['Synt_id'] == synt_id
             
             # Get counts for this group
-            multi_group_counts = self.adata.layers[multi_layer][mask]
-            unique_group_counts = self.adata.layers[unique_layer][mask]
+            multi_group_counts = self.adata.layers[multi_layer][:,mask]
+            unique_group_counts = self.adata.layers[unique_layer][:,mask]
             
             # Calculate total unique and ambiguous counts for this Synt_id
             multi_total_counts = np.sum(multi_group_counts)
@@ -85,12 +85,12 @@ class MultimappingRatioCalculator:
             
             # Calculate ratio if total_counts > 0
             if unique_total_counts > 0:
-                ratio_matrix[mask] = multi_total_counts / unique_total_counts
+                multi_ratio[mask] = multi_total_counts / (unique_total_counts + multi_total_counts)
         
         layer_name = f'multimapping_ratio'
         
         # Add the ratios as a new layer in the AnnData object
-        self.adata.layers[layer_name] = ratio_matrix
+        self.adata.var[layer_name] = multi_ratio
         
         return self.adata
     
@@ -114,8 +114,8 @@ class MultimappingRatioCalculator:
         if multi_layer not in self.adata.layers:
             raise ValueError(f"Mulitmapping layer '{multi_layer}' not found. Calculate ratios first.")
             
-        mask = self.adata.obsm['Synt_id'] == synt_id
-        return self.adata.layers[multi_layer][mask]
+        mask = self.adata.var['Synt_id'] == synt_id
+        return self.adata.layers[multi_layer][:,mask]
 
 
 def calculate_multi_ratios(adata, unique_layer='unique_counts', multi_layer='ambiguous_counts'):

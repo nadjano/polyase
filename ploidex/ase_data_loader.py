@@ -2,6 +2,7 @@ import pandas as pd
 import anndata as ad
 import os
 from pathlib import Path
+import numpy as np
 
 def load_ase_data(
     var_obs_file,
@@ -34,7 +35,7 @@ def load_ase_data(
     """
     # Load variant observations file
     var_obs = pd.read_csv(var_obs_file, delimiter="\t", index_col=0)
-    
+
     # Load additional counts file if provided
     if counts_file:
         additional_counts = pd.read_csv(counts_file, delimiter="\t")
@@ -88,10 +89,16 @@ def load_ase_data(
     # Rename columns
     ambig_counts.columns = sample_ids
     unique_counts.columns = sample_ids
+    
+    var_obs =var_obs.reindex(ambig_counts.index, fill_value= np.nan)
 
     # Reidex to also have the transcrits that where not maped
-    ambig_counts = ambig_counts.reindex(var_obs.index, fill_value=fillna)
-    unique_counts = unique_counts.reindex(var_obs.index, fill_value=fillna)
+    ambig_counts = ambig_counts.reindex(var_obs.index, fill_value=np.nan)
+    unique_counts = unique_counts.reindex(var_obs.index, fill_value=np.nan)
+
+    # Fill NA values
+    ambig_counts.fillna( np.nan, inplace=True)
+    unique_counts.fillna(np.nan, inplace=True)
 
     # Create AnnData object
     adata = ad.AnnData(

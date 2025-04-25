@@ -19,8 +19,8 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
         If inplace=False, returns modified copy of AnnData; otherwise returns None
         Results are stored in:
         - adata.uns['allelic_ratio_test']: Complete test results as DataFrame
-        - adata.obsm['allelic_ratio_pval']: P-values for each allele
-        - adata.obsm['allelic_ratio_FDR']: FDR-corrected p-values for each allele
+        - adata.var['allelic_ratio_pval']: P-values for each allele
+        - adata.var['allelic_ratio_FDR']: FDR-corrected p-values for each allele
     pd.DataFrame
         Results of statistical tests for each syntelog
     """
@@ -40,8 +40,8 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
         raise ValueError(f"Layer '{layer}' not found in AnnData object")
     
     # Check if group_key exists in var
-    if group_key not in adata.var:
-        raise ValueError(f"Group key '{group_key}' not found in adata.var")
+    if group_key not in adata.obs:
+        raise ValueError(f"Group key '{group_key}' not found in adata.obs")
     
     # Work on a copy if not inplace
     if not inplace:
@@ -56,19 +56,19 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
     allelic_ratio_counts = adata.layers["allelic_ratio_unique_counts"].copy()
     
     # Check for syntelog IDs
-    if "Synt_id" not in adata.obsm:
-        raise ValueError("'Synt_id' not found in adata.obsm")
-    synt_ids = adata.obsm["Synt_id"]
+    if "Synt_id" not in adata.var:
+        raise ValueError("'Synt_id' not found in adata.var")
+    synt_ids = adata.var["Synt_id"]
     
     # Check for transcript IDs
-    if "transcript_id" not in adata.obsm:
-        raise ValueError("'transcript_id' not found in adata.obsm")
-    transcript_ids = adata.obsm["transcript_id"]
+    if adata.var_names.any():
+        raise ValueError("'transcript_id' not found in adata.var_names")
+    transcript_ids = adata.var_names
     
     # Check conditions
-    if group_key not in adata.var:
-        raise ValueError(f"Group key '{group_key}' not found in adata.var")
-    conditions = adata.var[group_key].values
+    if group_key not in adata.obs:
+        raise ValueError(f"Group key '{group_key}' not found in adata.obs")
+    conditions = adata.obs[group_key].values
     
     # Get unique conditions and syntelog IDs
     unique_conditions = np.unique(conditions)
@@ -81,13 +81,13 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
     results = []
     
     # Create empty arrays for storing p-values in adata.obsm
-    pvals = np.full(adata.n_obs, np.nan)
-    fdr_pvals = np.full(adata.n_obs, np.nan)
-    ratio_diff = np.full(adata.n_obs, np.nan)
+    pvals = np.full(adata.n_var, np.nan)
+    fdr_pvals = np.full(adata.n_var, np.nan)
+    ratio_diff = np.full(adata.n_var, np.nan)
     
     # Create empty arrays for mean ratios per condition
-    mean_ratio_cond1 = np.full(adata.n_obs, np.nan)
-    mean_ratio_cond2 = np.full(adata.n_obs, np.nan)
+    mean_ratio_cond1 = np.full(adata.n_var, np.nan)
+    mean_ratio_cond2 = np.full(adata.n_var, np.nan)
     
     # Track progress
     total_syntelogs = len(unique_synt_ids)
@@ -116,22 +116,22 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
                 condition_indices = np.where(conditions == condition)[0]
                 
                 # Extract counts for these alleles and samples
-                condition_counts = counts[np.ix_(allele_indices, condition_indices)]
+                condition_counts = counts[np.ix_(ndition_indices, allele_indices)]
 
                 # Sum across samples to get total counts per allele for this condition
-                total_counts = np.sum(condition_counts, axis=0)
+                total_counts = np.sum(condition_counts, axis=1)
                 
                 # Get allelic ratios for this condition
-                condition_ratios = allelic_ratio_counts[np.ix_(allele_indices, condition_indices)]
+                condition_ratios = allelic_ratio_counts[np.ix_(condition_indices, allele_indices)]
         
                 # Append arrays for total counts
                 condition_total.append(total_counts)
 
                 # Append array for this specific allele's counts
-                allele_counts.append(condition_counts[allele_idx])
+                allele_counts.append(condition_counts[:,allele_idx])
                 #print(condition_ratios[allele_idx])
                 # Store ratios for this condition
-                allelic_ratios[condition] = condition_ratios[allele_idx]
+                allelic_ratios[condition] = condition_ratios[:,allele_idx]
             
             # Run the beta-binomial likelihood ratio test
             try:
@@ -198,11 +198,11 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
     
     # Store results in the AnnData object
     adata.uns['allelic_ratio_test'] = results_df
-    adata.obsm['allelic_ratio_pval'] = pvals
-    adata.obsm['allelic_ratio_FDR'] = fdr_pvals
-    adata.obsm['allelic_ratio_difference'] = ratio_diff
-    adata.obsm[f'allelic_ratio_mean_{unique_conditions[0]}'] = mean_ratio_cond1
-    adata.obsm[f'allelic_ratio_mean_{unique_conditions[1]}'] = mean_ratio_cond2
+    adata.var['allelic_ratio_pval'] = pvals
+    adata.var['allelic_ratio_FDR'] = fdr_pvals
+    adata.var['allelic_ratio_difference'] = ratio_diff
+    adata.var[f'allelic_ratio_mean_{unique_conditions[0]}'] = mean_ratio_cond1
+    adata.var[f'allelic_ratio_mean_{unique_conditions[1]}'] = mean_ratio_cond2
     
     # Print summary
     significant_results = results_df[(results_df['FDR'] < 0.05)]

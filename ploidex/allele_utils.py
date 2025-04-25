@@ -51,9 +51,9 @@ class AlleleRatioCalculator:
         if self.adata is None:
             raise ValueError("No AnnData object has been set")
             
-        # Make sure Synt_id is in obsm
-        if 'Synt_id' not in self.adata.obsm:
-            raise ValueError("'Synt_id' not found in obsm")
+        # Make sure Synt_id is in var
+        if 'Synt_id' not in self.adata.var:
+            raise ValueError("'Synt_id' not found in var")
         
         # Get counts from specified layer
         if counts_layer not in self.adata.layers:
@@ -64,7 +64,7 @@ class AlleleRatioCalculator:
         is_sparse = scipy.sparse.issparse(counts)
         
         # Get unique Synt_ids, excluding 0 and None
-        synt_ids = self.adata.obsm['Synt_id']
+        synt_ids = self.adata.var['Synt_id']
         valid_synt_ids = pd.unique(synt_ids[(synt_ids != 0) & (~pd.isna(synt_ids))])
         
         # Initialize ratio matrix with zeros - always use dense array for results
@@ -75,29 +75,31 @@ class AlleleRatioCalculator:
             # Create mask for current Synt_id
             mask = synt_ids == synt_id
             mask_indices = np.where(mask)[0]
-            
+    
             # Get counts for this group
             if is_sparse:
                 # For sparse matrices, extract the rows as a dense array
-                group_counts = counts[mask_indices].toarray()
+                group_counts = counts[:, mask_indices].toarray()
             else:
-                group_counts = counts[mask_indices]
+                group_counts = counts[:, mask_indices]
             
-            # Calculate column sums for this Synt_id (sum for each gene/feature)
-            column_totals = np.sum(group_counts, axis=0)
+
+            # Calculate row sums for this Synt_id (sum for each gene/feature)
+            column_totals = np.sum(group_counts, axis=1)
+     
             
             # Only process columns with non-zero totals
             non_zero_cols = column_totals > 0
-            
+
             # Vectorized calculation for all rows in this group
             if np.any(non_zero_cols):
                 # Broadcasting division for all rows in the group at once
                 group_ratios = np.zeros_like(group_counts, dtype=float)
-                group_ratios[:, non_zero_cols] = group_counts[:, non_zero_cols] / column_totals[non_zero_cols]
-                
+                group_ratios[non_zero_cols ] = group_counts[non_zero_cols ] / column_totals[non_zero_cols, np.newaxis]
+      
                 # Assign results back to the ratio matrix
                 for i, idx in enumerate(mask_indices):
-                    ratio_matrix[idx] = group_ratios[i]
+                    ratio_matrix[:, idx] = group_ratios[:,i]
         
         # Determine output layer name
         suffix = output_suffix or counts_layer
@@ -151,7 +153,7 @@ class AlleleRatioCalculator:
         if ratio_layer not in self.adata.layers:
             raise ValueError(f"Ratio layer '{ratio_layer}' not found. Calculate ratios first.")
             
-        mask = self.adata.obsm['Synt_id'] == synt_id
+        mask = self.adata.var['Synt_id'] == synt_id
         return self.adata.layers[ratio_layer][mask]
 
 

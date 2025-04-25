@@ -55,23 +55,24 @@ def plot_allelic_ratios(
     else:
         samples = sample
     
-    # Ensure all samples exist in obsm
+    # Ensure all samples exist in var
     for s in samples:
-        if s not in adata.obsm and s != "all":
-            raise ValueError(f"Sample '{s}' not found in adata.obsm")
+        if s not in adata.var and s != "all":
+            raise ValueError(f"Sample '{s}' not found in adata.var")
     
     # Filter the data for the specific synteny category
-    filtered_data = adata[adata.obsm['synteny_category'] == synteny_category].copy()
+    filtered_data = adata[:,adata.var['synteny_category'] == synteny_category].copy()
     
     if len(filtered_data) == 0:
         print(f"No data found for synteny category: {synteny_category}")
         return None
+
     
     # Add a tag for high multimapping ratio
-    filtered_data.obs['high_multimapping'] = np.any(
-        filtered_data.layers['multimapping_ratio'] > multimapping_threshold, 
-        axis=1
-    )
+    filtered_data.var['ambiguous_counts'] = np.where(
+    filtered_data.var['multimapping_ratio'] > multimapping_threshold, 
+    'high', 
+    'low')
     
     # Create figure with appropriate number of subplots
     if ratio_type == "both":
@@ -98,9 +99,9 @@ def plot_allelic_ratios(
     for sample_idx, current_sample in enumerate(samples):
         # Extract data for current sample
         if current_sample != "all":
-            sample_indices = np.where(filtered_data.var_names == current_sample)[0]
+            sample_indices = np.where(filtered_data.obs_names == current_sample)[0]
         else:
-            sample_indices = np.arange(filtered_data.shape[1])  # Use all columns if sample not found
+            sample_indices = np.arange(filtered_data.shape[0])  # Use all columns if sample not found
                  
         if ratio_type == "unique":
             layer_name = "allelic_ratio_unique_counts"
@@ -110,16 +111,16 @@ def plot_allelic_ratios(
             layer_name = "allelic_ratio_salmon_counts"
             color = "green"
             title_suffix = "Salmon Counts"
-            
+
         # Extract allelic ratios for the current sample and layer
-        allelic_ratios = filtered_data.layers[layer_name][:, sample_indices]
-            
+        allelic_ratios = filtered_data.layers[layer_name][sample_indices]
+
         # Create DataFrame for plotting
         plot_data = pd.DataFrame({
-            'allelic_ratio': allelic_ratios.flatten(),
-            'high_multimapping': np.repeat(filtered_data.obs['high_multimapping'].values, len(sample_indices))
+            'allelic_ratio': allelic_ratios.flatten(order='F'),
+            'ambiguous_counts': np.repeat(filtered_data.var['ambiguous_counts'].values, len(sample_indices))
         })
-            
+   
         # Drop NaN values
         plot_data = plot_data.dropna()
             
@@ -131,10 +132,10 @@ def plot_allelic_ratios(
         sns.histplot(
             data=plot_data, 
             x='allelic_ratio', 
-            hue='high_multimapping',
+            hue='ambiguous_counts',
             kde=kde,
             bins=bins,
-            palette=['#1f77b4', '#ff7f0e'],
+            palette={'low':'green', 'high':'grey'},
             ax=axes[plot_idx]
         )
             
@@ -195,17 +196,17 @@ def plot_allelic_ratios_comparison(
     matplotlib.figure.Figure
         The figure object containing the plot
     """
-    if sample not in adata.obsm and sample != "all":
-        raise ValueError(f"Sample '{sample}' not found in adata.obsm")
+    if sample not in adata.obs_names and sample != "all":
+        raise ValueError(f"Sample '{sample}' not found in adata.obs_names")
     
     if ratio_layer not in adata.layers:
         raise ValueError(f"Layer '{ratio_layer}' not found in adata.layers")
     
     # Determine sample index
     if sample != "all":
-        sample_indices = np.where(adata.var_names == sample)[0]
+        sample_indices = np.where(adata.obs_names == sample)[0]
     else:
-        sample_indices = np.arange(adata.shape[1])  # Use all columns if sample not found
+        sample_indices = np.arange(adata.shape[0])  # Use all columns if sample not found
     
     
     # Create figure
@@ -218,7 +219,7 @@ def plot_allelic_ratios_comparison(
     # Plot for each synteny category
     for idx, category in enumerate(synteny_categories):
         # Filter data for this category
-        filtered_data = adata[adata.obsm['synteny_category'] == category].copy()
+        filtered_data = adata[: ,adata.var['synteny_category'] == category].copy()
         
         if len(filtered_data) == 0:
             print(f"No data found for synteny category: {category}")
@@ -227,18 +228,18 @@ def plot_allelic_ratios_comparison(
             continue
         
         # Add multimapping tag
-        filtered_data.obs['high_multimapping'] = np.any(
-            filtered_data.layers['multimapping_ratio'] > multimapping_threshold, 
-            axis=1
-        )
+        filtered_data.var['ambiguous_counts'] = np.where(
+            filtered_data.var['multimapping_ratio'] > multimapping_threshold, 
+            'high', 
+            'low')
         
         # Extract allelic ratios
-        allelic_ratios = filtered_data.layers[ratio_layer][:, sample_indices]
-        
+        allelic_ratios = filtered_data.layers[ratio_layer][sample_indices]
+
         # Create DataFrame for plotting
         plot_data = pd.DataFrame({
-            'allelic_ratio': allelic_ratios.flatten(),
-            'high_multimapping': np.repeat(filtered_data.obs['high_multimapping'].values, len(sample_indices))
+            'allelic_ratio': allelic_ratios.flatten(order='F'),
+            'ambiguous_counts': np.repeat(filtered_data.var['ambiguous_counts'].values, len(sample_indices))
         })
         
         # Drop NaN values
@@ -252,10 +253,10 @@ def plot_allelic_ratios_comparison(
         sns.histplot(
             data=plot_data, 
             x='allelic_ratio', 
-            hue='high_multimapping',
+            hue='ambiguous_counts',
             kde=True,
             bins=bins,
-            palette=['#1f77b4', '#ff7f0e'],
+            palette={'low':'green', 'high':'grey'},
             ax=axes[idx]
         )
         

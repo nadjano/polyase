@@ -61,7 +61,7 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
     synt_ids = adata.var["Synt_id"]
     
     # Check for transcript IDs
-    if adata.var_names.any():
+    if not adata.var_names.any():
         raise ValueError("'transcript_id' not found in adata.var_names")
     transcript_ids = adata.var_names
     
@@ -81,13 +81,13 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
     results = []
     
     # Create empty arrays for storing p-values in adata.obsm
-    pvals = np.full(adata.n_var, np.nan)
-    fdr_pvals = np.full(adata.n_var, np.nan)
-    ratio_diff = np.full(adata.n_var, np.nan)
+    pvals = np.full(adata.n_vars, np.nan)
+    fdr_pvals = np.full(adata.n_vars, np.nan)
+    ratio_diff = np.full(adata.n_vars, np.nan)
     
     # Create empty arrays for mean ratios per condition
-    mean_ratio_cond1 = np.full(adata.n_var, np.nan)
-    mean_ratio_cond2 = np.full(adata.n_var, np.nan)
+    mean_ratio_cond1 = np.full(adata.n_vars, np.nan)
+    mean_ratio_cond2 = np.full(adata.n_vars, np.nan)
     
     # Track progress
     total_syntelogs = len(unique_synt_ids)
@@ -116,7 +116,7 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
                 condition_indices = np.where(conditions == condition)[0]
                 
                 # Extract counts for these alleles and samples
-                condition_counts = counts[np.ix_(ndition_indices, allele_indices)]
+                condition_counts = counts[np.ix_(condition_indices, allele_indices)]
 
                 # Sum across samples to get total counts per allele for this condition
                 total_counts = np.sum(condition_counts, axis=1)
@@ -164,19 +164,18 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
             mean_ratio_cond2[allele_pos] = ratio_stats[2]
             
             # Store results for each replicate
-            for replicate in range(len(allelic_ratios[unique_conditions[0]])):
-                results.append({
+            #for replicate in range(len(allelic_ratios[unique_conditions[0]])):
+            results.append({
                     'Synt_id': synt_id,
                     'allele': allele_num,
                     'transcript_id': transcript_id,
                     'p_value': p_value,
                     'ratio_difference': ratio_difference,
                     'n_alleles': len(allele_indices),
-                    'replicate': replicate,
                     f'ratios_{unique_conditions[0]}_mean': ratio_stats[0],
-                    f'ratios_rep_{unique_conditions[0]}': allelic_ratios[unique_conditions[0]][replicate],
+                    f'ratios_rep_{unique_conditions[0]}': allelic_ratios[unique_conditions[0]],
                     f'ratios_{unique_conditions[1]}_mean': ratio_stats[2],
-                    f'ratios_rep_{unique_conditions[1]}': allelic_ratios[unique_conditions[1]][replicate]
+                    f'ratios_rep_{unique_conditions[1]}': allelic_ratios[unique_conditions[1]]
                 })
     
     # Convert results to DataFrame
@@ -204,9 +203,11 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
     adata.var[f'allelic_ratio_mean_{unique_conditions[0]}'] = mean_ratio_cond1
     adata.var[f'allelic_ratio_mean_{unique_conditions[1]}'] = mean_ratio_cond2
     
+    # Group by Synt_id and take mininum FDR value
+    grouped_results = results_df.groupby('Synt_id').min("FDR")
     # Print summary
-    significant_results = results_df[(results_df['FDR'] < 0.05)]
-    print(f"Found {len(significant_results)/4} from {len(results_df)/4} syntelogs with significantly different allelic ratios (FDR < 0.05)")
+    significant_results = grouped_results[(grouped_results['FDR'] < 0.05)]
+    print(f"Found {len(significant_results)} from {len(grouped_results)} syntelogs with at least one significantly different allelic ratio (FDR < 0.05)")
     
     # Return AnnData object if not inplace
     if not inplace:

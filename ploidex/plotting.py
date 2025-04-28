@@ -285,6 +285,19 @@ def plot_allelic_ratios_comparison(
     
     #return fig
 
+
+
+def convert_pvalue_to_asterisks(pvalue):
+    if pvalue <= 0.0001:
+        return "****"
+    elif pvalue <= 0.001:
+        return "***"
+    elif pvalue <= 0.01:
+        return "**"
+    elif pvalue <= 0.05:
+        return "*"
+    return "ns"
+
 def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=None, jitter=0.2, alpha=0.7, ylim=(0, 1), sort_by='p_value', output_file=None):
     """
     Plot the top n syntelogs with differential allelic ratios.
@@ -339,6 +352,11 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
         print("ratio_difference column not found. Using p_value for sorting.")
         sort_by = 'p_value'
     
+    if sort_by == 'ratio_difference':
+        ascending_bool = False
+    else:
+        ascending_bool = True
+
     # Get the condition names
     condition_columns = [col for col in results_df.columns if col.startswith('ratios_rep_')]
     if not condition_columns:
@@ -347,8 +365,8 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
     
     conditions = [col.replace('ratios_rep_', '') for col in condition_columns]
     
-    # Get top n syntelogs with lowest p-values
-    top_syntelogs = results_df.sort_values(sort_by).drop_duplicates('Synt_id').head(n)['Synt_id'].unique()
+    # Get top n syntelogs with lowest sort_by values
+    top_syntelogs = results_df.sort_values(sort_by, ascending=ascending_bool).drop_duplicates('Synt_id').head(n)['Synt_id'].unique()
     
     # Filter results to include only these syntelogs
     top_results = results_df[results_df['Synt_id'].isin(top_syntelogs)]
@@ -366,16 +384,20 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
         
         # Sort by allele for better visualization
         synt_data = synt_data.sort_values('allele')
-        
+    
         # Get stats for this syntelog (take first row since they're the same for all replicates)
         p_value = synt_data['p_value'].iloc[0]
         fdr = synt_data['FDR'].iloc[0] if 'FDR' in synt_data.columns else np.nan
         n_alleles = synt_data['n_alleles'].iloc[0]
-        
+
+        # Explode the replicate ratio columns
+        explode_cols = [col for col in synt_data.columns if col.startswith('ratios_rep_')]
+        synt_data_exploded = synt_data.explode(explode_cols)
+
         # Reshape data for seaborn
         synt_data_melted = pd.melt(
-            synt_data, 
-            id_vars=['Synt_id', 'allele', 'transcript_id', 'replicate'], 
+            synt_data_exploded, 
+            id_vars=['Synt_id', 'allele', 'transcript_id', 'FDR'], 
             value_vars=condition_columns,
             var_name='condition', 
             value_name='ratio'
@@ -383,22 +405,28 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
         
         # Clean up condition names
         synt_data_melted['condition'] = synt_data_melted['condition'].str.replace('ratios_rep_', '')
-        
+
         # Create the stripplot
         ax = axes[i]
         sns.stripplot(
-            x='allele', 
+            x='transcript_id', 
             y='ratio', 
-            hue='condition', 
+            hue='condition',
             data=synt_data_melted, 
             jitter=jitter, 
             alpha=alpha,
             palette=palette,
             ax=ax
         )
-        
+        # get the asterisks for the FDRs
+        pvalue_asterisks = [convert_pvalue_to_asterisks(x) for x in synt_data['FDR']]
+  
         # Add mean values as horizontal lines for each allele and condition
+        i = 0
         for allele in synt_data['allele'].unique():
+            allele_pos = list(synt_data['allele'].unique()).index(allele)
+            ax.text(x=allele_pos-0.1 , y=0.9, s=pvalue_asterisks[i])
+            i = i+1
             for j, cond in enumerate(conditions):
                 mean_col = f'ratios_{cond}_mean'
                 if mean_col in synt_data.columns:
@@ -414,7 +442,7 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
         
         # Set title and labels
         fdr_text = f", FDR = {fdr:.2e}" if not np.isnan(fdr) else ""
-        ax.set_title(f"Syntelog {synt_id} (p = {p_value:.2e}{fdr_text}, {n_alleles} alleles)")
+        ax.set_title(f"Syntelog {synt_id}") # (p = {p_value:.2e}{fdr_text}, {n_alleles} alleles)")
         ax.set_xlabel('Allele')
         ax.set_ylabel('Expression Ratio')
         
@@ -422,19 +450,20 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
         ax.set_ylim(ylim)
         
         # Adjust legend
-        ax.legend(title='Condition')
+        ax.legend(title='Condition', loc='best')#, bbox_to_anchor=(2, 1))
         
         # Add transcript IDs as annotations
-        for j, allele in enumerate(synt_data['allele'].unique()):
-            transcript = synt_data[synt_data['allele'] == allele]['transcript_id'].iloc[0]
-            ax.annotate(
-                f"{transcript}", 
-                xy=(j, ylim[0] + 0.05), 
-                ha='center', 
-                fontsize=8,
-                alpha=0.7,
-                rotation=45
-            )
+        # for j, allele in enumerate(synt_data['allele'].unique()):
+        #     transcript = synt_data[synt_data['allele'] == allele]['transcript_id'].iloc[0]
+        #     ax.ticks(
+        #         f"{transcript}", 
+        #         xy=(j, 0), 
+        #         ha='center', 
+        #         fontsize=5,
+        #         alpha=1,
+        #         rotation=0
+        #     )
+        # ax.set_xticks([0,1,2,3], synt_data['transcript_id'], rotation=90)  # Set text labels and properties.
     
     plt.tight_layout()
     

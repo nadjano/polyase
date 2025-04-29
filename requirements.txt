@@ -17,6 +17,7 @@ iniconfig
 ipykernel
 ipython
 ipython_pygments_lexers
+isotools==0.3.4 
 jedi
 jupyter_client
 jupyter_core

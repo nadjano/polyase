@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+requires = ["setuptools >= 67"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "ploidex"
-version = "0.1.0"
+version = "0.1.2"
 description = "A package for analyzing allele-specific expression in polyploid plants"
 authors = [
     {name = "nadjano", email = "nadja.franziska.nolte@nib.si"}

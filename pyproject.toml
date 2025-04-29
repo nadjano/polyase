@@ -19,6 +19,7 @@ dependencies = [
         "anndata",
         "matplotlib",
         "seaborn",
+        "isotools"
 ]
 
 [project.urls]

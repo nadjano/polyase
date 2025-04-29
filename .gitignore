@@ -15,3 +15,4 @@ htmlcov/
 env/
 venv/
 ENV/
+.notebooks/long_readRNA_seq_counts_allele_atlantic.ipynb

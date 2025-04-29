@@ -93,12 +93,12 @@ def load_ase_data(
     var_obs =var_obs.reindex(ambig_counts.index, fill_value= np.nan)
 
     # Reidex to also have the transcrits that where not maped
-    ambig_counts = ambig_counts.reindex(var_obs.index, fill_value=np.nan)
-    unique_counts = unique_counts.reindex(var_obs.index, fill_value=np.nan)
+    ambig_counts = ambig_counts.reindex(var_obs.index, fill_value=fillna)
+    unique_counts = unique_counts.reindex(var_obs.index, fill_value=fillna)
 
     # Fill NA values
-    ambig_counts.fillna( np.nan, inplace=True)
-    unique_counts.fillna(np.nan, inplace=True)
+    ambig_counts.fillna(fillna, inplace=True)
+    unique_counts.fillna(fillna, inplace=True)
 
     # Create AnnData object
     adata = ad.AnnData(

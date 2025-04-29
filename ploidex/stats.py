@@ -63,7 +63,7 @@ def test_allelic_ratios_within_conditions(adata, layer="unique_counts", test_con
     transcript_ids = adata.var_names
     
     # Check conditions
-    if test_condition not in test_ad.obs['condition'].unique() and test_condition != "all":
+    if test_condition not in adata.obs['condition'].unique() and test_condition != "all":
         raise ValueError(f"Condition '{test_condition}' not found in adata.obs['condition']")
     
    

@@ -288,13 +288,13 @@ def plot_allelic_ratios_comparison(
 
 
 def convert_pvalue_to_asterisks(pvalue):
-    if pvalue <= 0.0001:
+    if pvalue <= 0.00001:
         return "****"
-    elif pvalue <= 0.001:
+    elif pvalue <= 0.0001:
         return "***"
-    elif pvalue <= 0.01:
+    elif pvalue <= 0.001:
         return "**"
-    elif pvalue <= 0.05:
+    elif pvalue <= 0.005:
         return "*"
     return "ns"
 
@@ -376,7 +376,7 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
     # Handle case where there's only one syntelog
     if len(top_syntelogs) == 1:
         axes = [axes]
-    
+
     # Plot each syntelog
     for i, synt_id in enumerate(top_syntelogs):
         # Get data for this syntelog
@@ -409,7 +409,7 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
         # Create the stripplot
         ax = axes[i]
         sns.stripplot(
-            x='transcript_id', 
+            x='allele', 
             y='ratio', 
             hue='condition',
             data=synt_data_melted, 
@@ -425,7 +425,7 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
         i = 0
         for allele in synt_data['allele'].unique():
             allele_pos = list(synt_data['allele'].unique()).index(allele)
-            ax.text(x=allele_pos-0.1 , y=0.9, s=pvalue_asterisks[i])
+            #ax.text(x=allele_pos-0.1 , y=0.9, s=pvalue_asterisks[i])
             i = i+1
             for j, cond in enumerate(conditions):
                 mean_col = f'ratios_{cond}_mean'

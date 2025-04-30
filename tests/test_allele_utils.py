@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from anndata import AnnData
 from scipy.sparse import csr_matrix
-from ploidex.allele_utils import AlleleRatioCalculator, calculate_allelic_ratios
+from polyase.allele_utils import AlleleRatioCalculator, calculate_allelic_ratios
 
 @pytest.fixture
 def create_test_adata():

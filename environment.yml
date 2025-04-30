@@ -1,4 +1,4 @@
-name: ploidex
+name: polyase
 channels:
   - conda-forge
   - bioconda

@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 import pandas as pd
 from anndata import AnnData
-from ploidex.multimapping import MultimappingRatioCalculator, calculate_multi_ratios
+from polyase.multimapping import MultimappingRatioCalculator, calculate_multi_ratios
 
 class TestMultimappingRatioCalculator(unittest.TestCase):
     

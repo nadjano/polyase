@@ -3,7 +3,7 @@ requires = ["setuptools >= 67"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ploidex"
+name = "polyase"
 version = "0.1.2"
 description = "A package for analyzing allele-specific expression in polyploid plants"
 authors = [
@@ -23,4 +23,4 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/nadjano/ploidex"
+"Homepage" = "https://github.com/nadjano/polyase"

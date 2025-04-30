@@ -205,17 +205,6 @@ def filter_by_group_expression(
     
     return filtered_adata
 
-def get_last_dropped_ids() -> Set[str]:
-    """
-    Get the set of group IDs that were dropped in the last filtering operation.
-    
-    Returns
-    -------
-    Set[str]
-        Set of dropped group IDs
-    """
-    global _last_dropped_ids
-    return _last_dropped_ids
 
 def get_group_expression(
     adata: ad.AnnData,

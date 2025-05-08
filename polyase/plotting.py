@@ -287,20 +287,10 @@ def plot_allelic_ratios_comparison(
 
 
 
-def convert_pvalue_to_asterisks(pvalue):
-    if pvalue <= 0.00001:
-        return "****"
-    elif pvalue <= 0.0001:
-        return "***"
-    elif pvalue <= 0.001:
-        return "**"
-    elif pvalue <= 0.005:
-        return "*"
-    return "ns"
-
-def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=None, jitter=0.2, alpha=0.7, ylim=(0, 1), sort_by='p_value', output_file=None):
+def plot_top_differential_syntelogs(results_df, n=5, figsize=(16, 12), palette=None, jitter=0.2, alpha=0.7, ylim=(0, 1), sort_by='p_value', output_file=None, sig_threshold=0.05, difference_threshold=0.05, sig_color='red'):
     """
-    Plot the top n syntelogs with differential allelic ratios.
+    Plot the top n syntelogs with differential allelic ratios in a grid layout (3 plots per row).
+    Syntelogs with significant differences will have their titles highlighted in red.
     
     Parameters
     -----------
@@ -309,7 +299,7 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
     n : int, optional
         Number of top syntelogs to plot (default: 5)
     figsize : tuple, optional
-        Figure size as (width, height) in inches (default: (12, 4*5))
+        Figure size as (width, height) in inches (default: (16, 12))
     palette : dict or None, optional
         Color palette for conditions (default: None, uses seaborn defaults)
     jitter : float, optional
@@ -322,6 +312,10 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
         Column to sort results by ('p_value', 'FDR', or 'ratio_difference') (default: 'p_value')
     output_file : str, optional
         Path to save the figure (default: None, displays figure but doesn't save)
+    sig_threshold : float, optional
+        Significance threshold for p-value or FDR (default: 0.05)
+    sig_color : str, optional
+        Color for titles of syntelogs with significant differences (default: 'red')
         
     Returns
     --------
@@ -332,6 +326,7 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
     import seaborn as sns
     import pandas as pd
     import numpy as np
+    import math
     
     if len(results_df) == 0:
         print("No results to plot")
@@ -371,11 +366,20 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
     # Filter results to include only these syntelogs
     top_results = results_df[results_df['Synt_id'].isin(top_syntelogs)]
     
-    # Create the figure
-    fig, axes = plt.subplots(len(top_syntelogs), 1, figsize=figsize)
-    # Handle case where there's only one syntelog
-    if len(top_syntelogs) == 1:
-        axes = [axes]
+    # Calculate grid dimensions - 3 plots per row
+    cols = 6
+    rows = math.ceil(len(top_syntelogs) / cols)
+    
+    # Create the figure with grid layout
+    fig, axes = plt.subplots(rows, cols, figsize=figsize)
+    
+    # Convert axes to flattened array for easier indexing
+    if rows == 1 and cols == 1:
+        axes = np.array([axes])
+    elif rows == 1 or cols == 1:
+        axes = axes.flatten()
+    else:
+        axes = axes.flatten()
 
     # Plot each syntelog
     for i, synt_id in enumerate(top_syntelogs):
@@ -386,8 +390,9 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
         synt_data = synt_data.sort_values('allele')
     
         # Get stats for this syntelog (take first row since they're the same for all replicates)
-        p_value = synt_data['p_value'].iloc[0]
-        fdr = synt_data['FDR'].iloc[0] if 'FDR' in synt_data.columns else np.nan
+        p_value = synt_data['p_value'].min()
+        fdr = synt_data['FDR'].min() if 'FDR' in synt_data.columns else np.nan
+        ratio_difference = synt_data['ratio_difference'].max() if 'ratio_difference' in synt_data.columns else np.nan
         n_alleles = synt_data['n_alleles'].iloc[0]
 
         # Explode the replicate ratio columns
@@ -397,7 +402,7 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
         # Reshape data for seaborn
         synt_data_melted = pd.melt(
             synt_data_exploded, 
-            id_vars=['Synt_id', 'allele', 'transcript_id', 'FDR'], 
+            id_vars=['Synt_id', 'allele', 'transcript_id', 'FDR'] if 'FDR' in synt_data.columns else ['Synt_id', 'allele', 'transcript_id'], 
             value_vars=condition_columns,
             var_name='condition', 
             value_name='ratio'
@@ -425,7 +430,7 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
         i = 0
         for allele in synt_data['allele'].unique():
             allele_pos = list(synt_data['allele'].unique()).index(allele)
-            #ax.text(x=allele_pos-0.1 , y=0.9, s=pvalue_asterisks[i])
+            ax.text(x=allele_pos-0.1 , y=0.9, s=pvalue_asterisks[i])
             i = i+1
             for j, cond in enumerate(conditions):
                 mean_col = f'ratios_{cond}_mean'
@@ -442,7 +447,20 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
         
         # Set title and labels
         fdr_text = f", FDR = {fdr:.2e}" if not np.isnan(fdr) else ""
-        ax.set_title(f"Syntelog {synt_id}") # (p = {p_value:.2e}{fdr_text}, {n_alleles} alleles)")
+        p_value_text = f", p = {p_value:.2e}"
+        
+        # Determine if this syntelog has a significant difference
+        is_significant = False
+        if 'FDR' in synt_data.columns and not np.isnan(fdr):
+            is_significant = (fdr <= sig_threshold) & (ratio_difference > difference_threshold)
+        else:
+            is_significant = p_value <= sig_threshold
+        
+        # Set title color based on significance
+        title_color = sig_color if is_significant else 'black'
+        
+        # Add title with optional stats and color based on significance
+        ax.set_title(f"{synt_id}{fdr_text}", color=title_color)
         ax.set_xlabel('Allele')
         ax.set_ylabel('Expression Ratio')
         
@@ -450,20 +468,11 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
         ax.set_ylim(ylim)
         
         # Adjust legend
-        ax.legend(title='Condition', loc='best')#, bbox_to_anchor=(2, 1))
-        
-        # Add transcript IDs as annotations
-        # for j, allele in enumerate(synt_data['allele'].unique()):
-        #     transcript = synt_data[synt_data['allele'] == allele]['transcript_id'].iloc[0]
-        #     ax.ticks(
-        #         f"{transcript}", 
-        #         xy=(j, 0), 
-        #         ha='center', 
-        #         fontsize=5,
-        #         alpha=1,
-        #         rotation=0
-        #     )
-        # ax.set_xticks([0,1,2,3], synt_data['transcript_id'], rotation=90)  # Set text labels and properties.
+        ax.legend(title='Condition', loc='best')
+    
+    # Hide unused subplots if any
+    for j in range(len(top_syntelogs), rows * cols):
+        axes[j].set_visible(False)
     
     plt.tight_layout()
     
@@ -472,3 +481,18 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(12, 4*5), palette=
         plt.savefig(output_file, dpi=300, bbox_inches='tight')
     
     return fig
+
+# Note: The convert_pvalue_to_asterisks function was referenced but not defined in the original code.
+# If needed, you would define it like this:
+def convert_pvalue_to_asterisks(pvalue):
+    """Convert p-values to significance asterisks notation."""
+    if pvalue <= 0.0001:
+        return "****"
+    elif pvalue <= 0.001:
+        return "***"
+    elif pvalue <= 0.01:
+        return "**"
+    elif pvalue <= 0.05:
+        return "*"
+    else:
+        return ""

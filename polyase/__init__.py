@@ -11,9 +11,9 @@ __author__ = "Nadja Nolte"
 
 from .allele_utils import AlleleRatioCalculator, calculate_allelic_ratios
 from .multimapping import MultimappingRatioCalculator, calculate_multi_ratios
-from .filter import filter_low_expression
+from .filter import filter_low_expressed_genes
 from .plotting import plot_allelic_ratios, plot_allelic_ratios_comparison, plot_top_differential_syntelogs
 from .ase_data_loader import load_ase_data
 from .stats import test_allelic_ratios_between_conditions, test_allelic_ratios_within_conditions, get_top_differential_syntelogs
 
-__all__ = ["AlleleRatioCalculator", "calculate_allelic_ratios", "MultimappingRatioCalculator", "calculate_multi_ratios", "filter_low_expression", "plot_allelic_ratios", "plot_allelic_ratios_comparison", "load_ase_data", "test_allelic_ratios_between_conditions", "test_allelic_ratios_within_conditions","plot_top_differential_syntelogs", "get_top_differential_syntelogs"]
+__all__ = ["filter_low_expressed_genes","AlleleRatioCalculator", "calculate_allelic_ratios", "MultimappingRatioCalculator", "calculate_multi_ratios","plot_allelic_ratios", "plot_allelic_ratios_comparison", "load_ase_data", "test_allelic_ratios_between_conditions", "test_allelic_ratios_within_conditions","plot_top_differential_syntelogs", "get_top_differential_syntelogs"]

@@ -392,7 +392,7 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(16, 12), palette=N
         # Get stats for this syntelog (take first row since they're the same for all replicates)
         p_value = synt_data['p_value'].min()
         fdr = synt_data['FDR'].min() if 'FDR' in synt_data.columns else np.nan
-        ratio_difference = synt_data['ratio_difference'].max() if 'ratio_difference' in synt_data.columns else np.nan
+        ratio_difference = synt_data.loc[synt_data['FDR'] < sig_threshold, 'ratio_difference'].max() if ('ratio_difference' in synt_data.columns and 'FDR' in synt_data.columns) else np.nan
         n_alleles = synt_data['n_alleles'].iloc[0]
 
         # Explode the replicate ratio columns
@@ -430,7 +430,7 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(16, 12), palette=N
         i = 0
         for allele in synt_data['allele'].unique():
             allele_pos = list(synt_data['allele'].unique()).index(allele)
-            ax.text(x=allele_pos-0.1 , y=0.9, s=pvalue_asterisks[i])
+            #xax.text(x=allele_pos-0.1 , y=0.9, s=pvalue_asterisks[i])
             i = i+1
             for j, cond in enumerate(conditions):
                 mean_col = f'ratios_{cond}_mean'

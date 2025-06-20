@@ -72,7 +72,7 @@ def load_ase_data(
             if alternate_files:
                 file_path = str(alternate_files[0])
             else:
-                print(f"Warning: No file found for sample {sample_id}")
+                print(f"Warning: No file found for sample {sample_id}. The counts dir should contain files named like '{sample_id}_condition.counts.tsv' or '{sample_id}*.ambig_info.tsv'.")
                 continue
 
         counts_df = pd.read_csv(file_path, delimiter="\t", index_col=0)

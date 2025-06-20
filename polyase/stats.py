@@ -151,15 +151,21 @@ def test_allelic_ratios_within_conditions(adata, layer="unique_counts", test_con
             # Get transcript ID and parse allele info
             transcript_id = transcript_ids[allele_pos]
 
-            # Extract allele number from transcript ID
+            haplotype = adata.var['haplotype'].iloc[allele_indices[allele_idx]]
+            # Extract allele number from haplotype
+
             try:
-                allele_match = re.search(r'\dG', transcript_id)
+                allele_match = re.search(r'hap(\d+)', haplotype)  # Capture the number
+                print(allele_match)
                 if allele_match:
-                    allele_num = allele_match.group(0).split('G')[0]
+                    allele_num = allele_match.group(1)  # Get the captured number directly
                 else:
                     allele_num = f"{allele_idx+1}"  # Fallback if regex fails
-            except:
-                allele_num = f"{allele_idx+1}"  # Fallback if regex fails
+                    print(f"No match found, using fallback: {allele_num}")
+            except Exception as e:
+                print(f"Error: {e}")
+                allele_num = f"{allele_idx+1}"  # Fallback if any error occurs
+
 
             # Store p-value in the arrays we created
             pvals[allele_pos] = p_value
@@ -374,15 +380,19 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
             # Get transcript ID and parse allele info
             transcript_id = transcript_ids[allele_pos]
 
-            # Extract allele number from transcript ID
+            haplotype = adata.var['haplotype'].iloc[allele_indices[allele_idx]]
+            # Extract allele number from haplotype
             try:
-                allele_match = re.search(r'\dG', transcript_id)
+                allele_match = re.search(r'hap(\d+)', haplotype)  # Capture the number
                 if allele_match:
-                    allele_num = allele_match.group(0).split('G')[0]
+                    allele_num = allele_match.group(1)  # Get the captured number directly
+
                 else:
                     allele_num = f"{allele_idx+1}"  # Fallback if regex fails
-            except:
-                allele_num = f"{allele_idx+1}"  # Fallback if regex fails
+                    print(f"No match found, using fallback: {allele_num}")
+            except Exception as e:
+                print(f"Error: {e}")
+                allele_num = f"{allele_idx+1}"  # Fallback if any error occurs
 
             # Store p-value in the arrays we created
             pvals[allele_pos] = p_value
@@ -495,6 +505,3 @@ def get_top_differential_syntelogs(results_df, n=5, sort_by='p_value', fdr_thres
 
     # Return filtered dataframe
     return results_df[results_df['Synt_id'].isin(top_syntelogs)]
-
-
-

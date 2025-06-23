@@ -204,3 +204,96 @@ print(f"Number of transcripts: {adata.n_vars}")
 print(f"Number of samples: {adata.n_obs}")
 print(f"Gene IDs: {adata.var['gene_id'].unique()}")
 """
+
+
+
+
+def aggregate_transcripts_to_genes(adata_tx):
+    """
+    Aggregate transcript-level AnnData to gene-level AnnData.
+
+    Parameters
+    ----------
+    adata_tx : AnnData
+        Transcript-level AnnData object
+
+    Returns
+    -------
+    AnnData
+        Gene-level AnnData object
+    """
+
+    # Get unique genes
+    unique_genes = adata_tx.var['gene_id'].dropna().unique()
+    n_genes = len(unique_genes)
+    n_obs = adata_tx.n_obs
+
+    print(f"Aggregating {adata_tx.n_vars} transcripts to {n_genes} genes")
+
+    # Initialize matrices for aggregated data
+    X_gene = np.zeros((n_obs, n_genes))
+    unique_counts_gene = np.zeros((n_obs, n_genes))
+    ambiguous_counts_gene = np.zeros((n_obs, n_genes))
+    allelic_ratio_gene = np.zeros((n_obs, n_genes))
+
+    # Create gene-level var DataFrame
+    gene_var = pd.DataFrame(index=unique_genes)
+    gene_var['gene_id'] = unique_genes
+    gene_var['feature_type'] = 'gene'
+
+    # Aggregate gene-level metadata (take first occurrence or most common)
+    gene_metadata_cols = ['Synt_id', 'synteny_category', 'syntenic_genes', 'haplotype', 'CDS_length_category', 'CDS_percent_difference', 'CDS_haplotype_with_longest_annotation' ]
+    for col in gene_metadata_cols:
+        if col in adata_tx.var.columns:
+            gene_var[col] = None
+
+    # Process each gene
+    for i, gene_id in enumerate(unique_genes):
+        # Get transcripts for this gene
+        tx_mask = adata_tx.var['gene_id'] == gene_id
+        tx_indices = np.where(tx_mask)[0]
+
+        if len(tx_indices) == 0:
+            continue
+
+        # Sum unique counts (main X matrix and unique_counts layer)
+        X_gene[:, i] = adata_tx.X[:, tx_indices].sum(axis=1)
+        unique_counts_gene[:, i] = adata_tx.layers['unique_counts'][:, tx_indices].sum(axis=1)
+
+        # Average ambiguous counts
+        ambiguous_counts_gene[:, i] = adata_tx.layers['ambiguous_counts'][:, tx_indices].mean(axis=1)
+
+
+
+        # Aggregate metadata (take first occurrence for categorical data)
+        tx_var_subset = adata_tx.var.iloc[tx_indices]
+        for col in gene_metadata_cols:
+            if col in adata_tx.var.columns:
+                # Take the first non-null value, or most common value
+                values = tx_var_subset[col].dropna()
+                if len(values) > 0:
+                    gene_var.loc[gene_id, col] = values.iloc[0]
+
+
+
+    # Create gene-level AnnData
+    adata_gene = ad.AnnData(
+        X=X_gene,
+        obs=adata_tx.obs.copy(),
+        var=gene_var
+    )
+
+    # Add layers
+    adata_gene.layers['unique_counts'] = unique_counts_gene
+    adata_gene.layers['ambiguous_counts'] = ambiguous_counts_gene
+
+
+    # Add summary statistics
+    n_transcripts_per_gene = adata_tx.var.groupby('gene_id').size()
+    adata_gene.var['n_transcripts'] = n_transcripts_per_gene.reindex(adata_gene.var_names, fill_value=0)
+
+    print(f"Created gene-level AnnData: {adata_gene.n_obs} × {adata_gene.n_vars}")
+    print(f"Average transcripts per gene: {adata_gene.var['n_transcripts'].mean():.2f}")
+
+    return adata_gene
+

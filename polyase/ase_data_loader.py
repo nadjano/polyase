@@ -3,6 +3,7 @@ import anndata as ad
 import os
 from pathlib import Path
 import numpy as np
+from scipy import sparse
 
 def load_ase_data(
     var_obs_file,
@@ -207,10 +208,10 @@ print(f"Gene IDs: {adata.var['gene_id'].unique()}")
 
 
 
-
 def aggregate_transcripts_to_genes(adata_tx):
     """
     Aggregate transcript-level AnnData to gene-level AnnData.
+    Optimized version using vectorized operations and sparse matrices.
 
     Parameters
     ----------
@@ -222,59 +223,75 @@ def aggregate_transcripts_to_genes(adata_tx):
     AnnData
         Gene-level AnnData object
     """
-
-    # Get unique genes
-    unique_genes = adata_tx.var['gene_id'].dropna().unique()
+    # Get unique genes and create mapping
+    gene_ids = adata_tx.var['gene_id'].dropna()
+    unique_genes = gene_ids.unique()
     n_genes = len(unique_genes)
     n_obs = adata_tx.n_obs
 
     print(f"Aggregating {adata_tx.n_vars} transcripts to {n_genes} genes")
 
-    # Initialize matrices for aggregated data
-    X_gene = np.zeros((n_obs, n_genes))
-    unique_counts_gene = np.zeros((n_obs, n_genes))
-    ambiguous_counts_gene = np.zeros((n_obs, n_genes))
-    allelic_ratio_gene = np.zeros((n_obs, n_genes))
+    # Create mapping from gene_id to index
+    gene_to_idx = {gene: idx for idx, gene in enumerate(unique_genes)}
+
+    # Create transcript to gene mapping matrix (sparse for efficiency)
+    # This matrix has shape (n_transcripts, n_genes)
+    tx_indices = []
+    gene_indices = []
+
+    for tx_idx, gene_id in enumerate(gene_ids):
+        if pd.notna(gene_id) and gene_id in gene_to_idx:
+            tx_indices.append(tx_idx)
+            gene_indices.append(gene_to_idx[gene_id])
+
+    # Create sparse mapping matrix
+    mapping_matrix = sparse.csr_matrix(
+        (np.ones(len(tx_indices)), (tx_indices, gene_indices)),
+        shape=(len(gene_ids), n_genes)
+    )
+
+    # Vectorized aggregation
+    # Convert to sparse if not already
+    X_sparse = sparse.csr_matrix(adata_tx.X) if not sparse.issparse(adata_tx.X) else adata_tx.X
+    unique_counts_sparse = sparse.csr_matrix(adata_tx.layers['unique_counts']) if not sparse.issparse(adata_tx.layers['unique_counts']) else adata_tx.layers['unique_counts']
+    ambiguous_counts_sparse = sparse.csr_matrix(adata_tx.layers['ambiguous_counts']) if not sparse.issparse(adata_tx.layers['ambiguous_counts']) else adata_tx.layers['ambiguous_counts']
+
+    # Aggregate using matrix multiplication
+    X_gene = X_sparse @ mapping_matrix
+    unique_counts_gene = unique_counts_sparse @ mapping_matrix
+
+    # For ambiguous counts (mean), we need to divide by the number of transcripts per gene
+    ambiguous_sum = ambiguous_counts_sparse @ mapping_matrix
+    transcripts_per_gene = mapping_matrix.sum(axis=0).A1  # Convert to 1D array
+    transcripts_per_gene[transcripts_per_gene == 0] = 1  # Avoid division by zero
+    ambiguous_counts_gene = ambiguous_sum / transcripts_per_gene[np.newaxis, :]
+
+    # Convert back to dense arrays if needed
+    X_gene = X_gene.toarray() if sparse.issparse(X_gene) else X_gene
+    unique_counts_gene = unique_counts_gene.toarray() if sparse.issparse(unique_counts_gene) else unique_counts_gene
+    ambiguous_counts_gene = ambiguous_counts_gene.toarray() if sparse.issparse(ambiguous_counts_gene) else ambiguous_counts_gene
 
     # Create gene-level var DataFrame
     gene_var = pd.DataFrame(index=unique_genes)
     gene_var['gene_id'] = unique_genes
     gene_var['feature_type'] = 'gene'
 
-    # Aggregate gene-level metadata (take first occurrence or most common)
-    gene_metadata_cols = ['Synt_id', 'synteny_category', 'syntenic_genes', 'haplotype', 'CDS_length_category', 'CDS_percent_difference', 'CDS_haplotype_with_longest_annotation' ]
+    # Aggregate metadata efficiently using groupby
+    gene_metadata_cols = [
+        'Synt_id', 'synteny_category', 'syntenic_genes', 'haplotype',
+        'CDS_length_category', 'CDS_percent_difference',
+        'CDS_haplotype_with_longest_annotation'
+    ]
+
+    # Filter to only transcripts with valid gene_ids
+    valid_tx_mask = gene_ids.notna()
+    tx_var_valid = adata_tx.var[valid_tx_mask].copy()
+
     for col in gene_metadata_cols:
         if col in adata_tx.var.columns:
-            gene_var[col] = None
-
-    # Process each gene
-    for i, gene_id in enumerate(unique_genes):
-        # Get transcripts for this gene
-        tx_mask = adata_tx.var['gene_id'] == gene_id
-        tx_indices = np.where(tx_mask)[0]
-
-        if len(tx_indices) == 0:
-            continue
-
-        # Sum unique counts (main X matrix and unique_counts layer)
-        X_gene[:, i] = adata_tx.X[:, tx_indices].sum(axis=1)
-        unique_counts_gene[:, i] = adata_tx.layers['unique_counts'][:, tx_indices].sum(axis=1)
-
-        # Average ambiguous counts
-        ambiguous_counts_gene[:, i] = adata_tx.layers['ambiguous_counts'][:, tx_indices].mean(axis=1)
-
-
-
-        # Aggregate metadata (take first occurrence for categorical data)
-        tx_var_subset = adata_tx.var.iloc[tx_indices]
-        for col in gene_metadata_cols:
-            if col in adata_tx.var.columns:
-                # Take the first non-null value, or most common value
-                values = tx_var_subset[col].dropna()
-                if len(values) > 0:
-                    gene_var.loc[gene_id, col] = values.iloc[0]
-
-
+            # Use groupby to get first non-null value for each gene
+            gene_metadata = tx_var_valid.groupby('gene_id')[col].first()
+            gene_var[col] = gene_metadata.reindex(unique_genes)
 
     # Create gene-level AnnData
     adata_gene = ad.AnnData(
@@ -287,13 +304,13 @@ def aggregate_transcripts_to_genes(adata_tx):
     adata_gene.layers['unique_counts'] = unique_counts_gene
     adata_gene.layers['ambiguous_counts'] = ambiguous_counts_gene
 
-
     # Add summary statistics
-    n_transcripts_per_gene = adata_tx.var.groupby('gene_id').size()
-    adata_gene.var['n_transcripts'] = n_transcripts_per_gene.reindex(adata_gene.var_names, fill_value=0)
+    n_transcripts_per_gene = gene_ids.value_counts()
+    adata_gene.var['n_transcripts'] = n_transcripts_per_gene.reindex(
+        adata_gene.var_names, fill_value=0
+    )
 
     print(f"Created gene-level AnnData: {adata_gene.n_obs} × {adata_gene.n_vars}")
     print(f"Average transcripts per gene: {adata_gene.var['n_transcripts'].mean():.2f}")
 
     return adata_gene
-

@@ -9,7 +9,7 @@
 project = 'LongPolyASE'
 copyright = '2025, Nadja Nolte'
 author = 'Nadja Nolte'
-release = '0.1.0'
+release = '1.0.1'
 
 import os
 import sys
@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.abspath('../../polyase/'))
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-extensions = ['sphinx.ext.autodoc', 'sphinx.ext.coverage', 'sphinx.ext.napoleon', 'nbsphinx' ]
+extensions = ['sphinx.ext.autodoc', 'sphinx.ext.coverage', 'sphinx.ext.napoleon', 'nbsphinx', 'sphinx_mdinclude']
 
 templates_path = ['_templates']
 exclude_patterns = []

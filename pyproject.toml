@@ -39,7 +39,9 @@ docs = [
     "sphinx (>= 4.0.0)",
     "sphinx-rtd-theme",
     "bluepy (>= 1.3.0)",
-    "nbsphinx"
+    "nbsphinx",
+    "sphinx-mdinclude-0.6.2"
+
 ]
 
 [build-system]

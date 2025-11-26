@@ -41,7 +41,6 @@ docs = [
     "bluepy (>= 1.3.0)",
     "nbsphinx",
     "sphinx-mdinclude"
-
 ]
 
 [build-system]

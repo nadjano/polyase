@@ -21,3 +21,7 @@ The package can be installed via pip:
 .. code-block:: bash
 
       pip install polyase
+
+
+.. include:: ../README.md
+   :parser: myst_parser.sphinx_

@@ -104,8 +104,6 @@ def filter_low_expressed_genes(
         How to normalize for library size:
 
         - 'cpm': Counts Per Million (divide by lib_size/1e6)
-        - 'rpkm': Reads Per Kilobase Million (not implemented yet)
-        - 'tpm': Transcripts Per Million (not implemented yet)
         - None: No normalization
     layer : str or None, default=None
         Layer to use for expression values. If None, use .X
@@ -143,10 +141,7 @@ def filter_low_expressed_genes(
         raise ValueError("mode must be one of 'any', 'all', or 'mean'")
 
     if lib_size_normalization not in ['cpm', None]:
-        if lib_size_normalization in ['rpkm', 'tpm']:
-            raise NotImplementedError(f"Normalization method '{lib_size_normalization}' not yet implemented")
-        else:
-            raise ValueError(f"Unsupported normalization method: {lib_size_normalization}, use 'cpm' or None")
+        raise ValueError(f"Unsupported normalization method: {lib_size_normalization}, use 'cpm' or None")
 
     # Get group mapping
     group_mapping = _get_group_mapping(adata, group_col, group_source)

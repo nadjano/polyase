@@ -3,7 +3,7 @@ stats.py
 ====================================
 The stats module of polyase project
 """
-def test_allelic_ratios_within_conditions(adata, layer="unique_counts", test_condition="control", inplace=True):
+def test_allelic_ratios_within_conditions(adata, layer="unique_counts", test_condition="control", inplace=True, FDR_cutoff=0.05, ratio_diff_cutoff=0.1):
     """
     Test if alleles of a gene have unequal expression and store results in AnnData object.
 
@@ -17,6 +17,10 @@ def test_allelic_ratios_within_conditions(adata, layer="unique_counts", test_con
         Variable column name containing condition for testing within (default: "control")
     inplace : bool, optional
         Whether to modify the input AnnData object or return a copy (default: True)
+    FDR_cutoff : float, optional
+        False discovery rate cutoff for significance (default: 0.05)
+    ratio_diff_cutoff : float, optional
+        Minimum ratio difference for significance (default: 0.1)
 
     Returns
     --------
@@ -250,15 +254,18 @@ def test_allelic_ratios_within_conditions(adata, layer="unique_counts", test_con
     adata.var['allelic_ratio_difference'] = ratio_diff
     adata.var[f'allelic_ratio_mean_{test_condition}'] = mean_ratio_cond1
 
-    # Group by Synt_id and take minimum FDR value and max ratio difference
+    # Filter for significant results and then group by synt_id
     if len(results_df) > 0:
+        results_df_sig = results_df[(results_df['FDR'] < FDR_cutoff) & (results_df['ratio_difference'] > ratio_diff_cutoff)]
+        results_df_sig_grouped = results_df_sig.groupby('Synt_id').agg({
+            'FDR': list,
+            'ratio_difference': list
+        })
         grouped_results = results_df.groupby('Synt_id').agg({
             'FDR': 'min',
             'ratio_difference': 'max'
-        })
-        # Print summary
-        significant_results = grouped_results[(grouped_results['FDR'] < 0.05) & (grouped_results['ratio_difference'] > 0.1)]
-        print(f"Found {len(significant_results)} from {len(grouped_results)} syntelogs with at least one significantly different allele (FDR < 0.05 and ratio difference > 0.1)")
+        })   
+        print(f"Found {len(results_df_sig_grouped)} from {len(grouped_results)} syntelogs with at least one significantly different allele (FDR < {FDR_cutoff} and ratio difference > {ratio_diff_cutoff})")
 
     # Return AnnData object if not inplace
     if not inplace:
@@ -267,7 +274,7 @@ def test_allelic_ratios_within_conditions(adata, layer="unique_counts", test_con
         return results_df
 
 
-def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_key="condition", inplace=True):
+def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_key="condition", inplace=True, FDR_cutoff=0.05, ratio_diff_cutoff=0.1):
     """
     Test if allelic ratios change between conditions and store results in AnnData object.
 
@@ -281,6 +288,10 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
         Variable column name containing condition information (default: "condition")
     inplace : bool, optional
         Whether to modify the input AnnData object or return a copy (default: True)
+    FDR_cutoff : float, optional
+        False discovery rate cutoff for significance (default: 0.05)
+    ratio_diff_cutoff : float, optional
+        Minimum ratio difference for significance (default: 0.1)
 
     Returns
     --------
@@ -517,12 +528,19 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
     adata.var[f'allelic_ratio_mean_{unique_conditions[0]}'] = mean_ratio_cond1
     adata.var[f'allelic_ratio_mean_{unique_conditions[1]}'] = mean_ratio_cond2
 
-    # Group by Synt_id and take minimum FDR value
+    # Find significant results and group by synt_id
     if len(results_df) > 0:
-        grouped_results = results_df.groupby('Synt_id').min("FDR")
-        # Print summary
-        significant_results = grouped_results[(grouped_results['FDR'] < 0.05)]
-        print(f"Found {len(significant_results)} from {len(grouped_results)} syntelogs with at least one significantly different allelic ratio (FDR < 0.05)")
+        results_df_sig = results_df[(results_df['FDR'] < FDR_cutoff) & (results_df['ratio_difference'] > ratio_diff_cutoff)]
+        results_df_sig_grouped = results_df_sig.groupby('Synt_id').agg({
+            'FDR': list,
+            'ratio_difference': list
+        })
+        grouped_results = results_df.groupby('Synt_id').agg({
+            'FDR': 'min',
+            'ratio_difference': 'max'
+        })   
+        print(f"Found {len(results_df_sig_grouped)} from {len(grouped_results)} syntelogs with at least one significantly different allele (FDR < {FDR_cutoff} and ratio difference > {ratio_diff_cutoff})")
+
 
     # Return AnnData object if not inplace
     if not inplace:
@@ -580,7 +598,7 @@ def get_top_differential_syntelogs(results_df, n=5, sort_by='p_value', fdr_thres
     # Return filtered dataframe
     return results_df[results_df['Synt_id'].isin(top_syntelogs)]
 
-def test_isoform_DIU_between_conditions(adata, layer="unique_counts", group_key="condition", gene_id_key="gene_id", inplace=True):
+def test_isoform_DIU_between_conditions(adata, layer="unique_counts", group_key="condition", gene_id_key="gene_id", inplace=True, FDR_cutoff=0.05, ratio_diff_cutoff=0.2):
     """
     Test if isoform usage ratios change between conditions and store results in AnnData object.
 
@@ -596,6 +614,10 @@ def test_isoform_DIU_between_conditions(adata, layer="unique_counts", group_key=
         Variable column name containing gene ID information (default: "gene_id")
     inplace : bool, optional
         Whether to modify the input AnnData object or return a copy (default: True)
+    FDR_cutoff : float, optional
+        False discovery rate cutoff for significance (default: 0.05)
+    ratio_diff_cutoff : float, optional
+        Minimum ratio difference for significance (default: 0.2)
 
     Returns
     --------
@@ -879,16 +901,21 @@ def test_isoform_DIU_between_conditions(adata, layer="unique_counts", group_key=
     adata.var[f'isoform_usage_mean_{unique_conditions[0]}'] = mean_ratio_cond1
     adata.var[f'isoform_usage_mean_{unique_conditions[1]}'] = mean_ratio_cond2
 
-    # Group by gene_id and take minimum FDR value
-    grouped_results = results_df.groupby('gene_id').agg({
-        'FDR': 'min',
-        'p_value': 'min',
-        'n_isoforms': 'first'
-    }).reset_index()
+    # Find significant results and group by synt_id
+    if len(results_df) > 0:
+        results_df_sig = results_df[(results_df['FDR'] < FDR_cutoff) & (results_df['ratio_difference'] > ratio_diff_cutoff)]
+        results_df_sig_grouped = results_df_sig.groupby('gene_id').agg({
+            'FDR': list,
+            'ratio_difference': list
+        })
+        grouped_results = results_df.groupby('gene_id').agg({
+            'FDR': 'min',
+            'ratio_difference': 'max'
+        })   
+        print(f"Found {len(results_df_sig_grouped)} from {len(grouped_results)} genes with at least one significantly different isoform (FDR < {FDR_cutoff} and ratio difference > {ratio_diff_cutoff})")
+    else:
+        print("No results found.")
 
-    # Print summary
-    significant_results = grouped_results[grouped_results['FDR'] < 0.05]
-    print(f"Found {len(significant_results)} from {len(grouped_results)} genes with at least one significantly different isoform usage (FDR < 0.05)")
     print(f"Skipped {no_counts_isoform} isoforms due to zero counts")
     print(f"Created plotting table with {len(plotting_df)} rows (one per replicate, condition, isoform ratio, and transcript)")
 
@@ -899,8 +926,6 @@ def test_isoform_DIU_between_conditions(adata, layer="unique_counts", group_key=
         return results_df, plotting_df
 
 
-
-
 def test_differential_isoform_structure(
     adata, layer="unique_counts", test_condition="control",
     min_similarity_for_matching=0.9,
@@ -909,15 +934,43 @@ def test_differential_isoform_structure(
     intron_weight=0.4,
     inplace=True, 
     verbose=False,
-    return_plotting_data=True
+    return_plotting_data=True,
+    ratio_diff_cutoff=0.2,
+    FDR_cutoff=0.05
 ):
     """
     Test for DIU between alleles with intelligent major/minor isoform fallback.
     
-    IMPROVED VERSION:
     - Includes isoforms in plotting data even if they have zero expression in reference haplotype
     - Matches zero-expressed reference isoforms with corresponding isoforms in other haplotypes
     
+    Parameters
+    -----------
+    adata : AnnData
+        AnnData object containing expression data
+    layer : str, optional
+        Layer containing count data (default: "unique_counts")
+    test_condition : str, optional
+        Condition to test for differential isoform usage (default: "control")
+    min_similarity_for_matching : float, optional
+        Minimum similarity score for matching isoforms (default: 0.9)
+    use_introns : bool, optional
+        Whether to include intron structures in similarity calculations (default: True)
+    exon_weight : float, optional
+        Weight for exon similarity in overall similarity score (default: 0.6)
+    intron_weight : float, optional
+        Weight for intron similarity in overall similarity score (default: 0.4)
+    inplace : bool, optional
+        Whether to modify the input AnnData object or return a copy (default: True)
+    verbose : bool, optional
+        Whether to print progress messages (default: False)
+    return_plotting_data : bool, optional
+        Whether to return plotting data along with results (default: True)
+    ratio_diff_cutoff : float, optional
+        Minimum ratio difference for significance (default: 0.2)        
+    FDR_cutoff : float, optional
+        False discovery rate cutoff for significance (default: 0.05)
+
     Returns
     -------
     tuple or pd.DataFrame
@@ -1181,12 +1234,12 @@ def test_differential_isoform_structure(
         if comparisons_made > 0:
             stats['tested'] += 1
         
-        # IMPROVED: Create plotting data that includes ALL isoforms from reference haplotype
+        # Create plotting data that includes ALL isoforms from reference haplotype
         if return_plotting_data and comparisons_made > 0:
             gene_id = gene_ids.get(reference_transcript, None)
             library_sizes = np.sum(counts[condition_indices, :], axis=1)
             
-            # IMPROVED: Build comprehensive isoform matching for ALL reference isoforms
+            # Build comprehensive isoform matching for ALL reference isoforms
             all_haplotype_isoform_matches = _match_all_isoforms_for_plotting(
                 all_ref_isoforms,
                 unique_haplotypes,
@@ -1274,20 +1327,22 @@ def test_differential_isoform_structure(
     
     if len(results_df) > 0:
         results_df['FDR'] = multipletests(results_df['p_value'], method='fdr_bh')[1]
-        results_df = results_df.sort_values('p_value')
-        
-        significant = results_df[(results_df['FDR'] < 0.05) & (results_df['ratio_difference'] > 0.2)]
-        
-        print(f"\nResults Summary:")
+        results_df_sig = results_df[(results_df['FDR'] < FDR_cutoff) & (results_df['ratio_difference'] > ratio_diff_cutoff)]
+        results_df_sig_grouped = results_df_sig.groupby('Synt_id').agg({
+            'FDR': list,
+            'ratio_difference': list
+        })
+        grouped_results = results_df.groupby('Synt_id').agg({
+            'FDR': 'min',
+            'ratio_difference': 'max'
+        })   
+        print(f"Found {len(results_df_sig_grouped)} from {len(grouped_results)} genes with at least one significantly different isoform (FDR < {FDR_cutoff} and ratio difference > {ratio_diff_cutoff})")
+
+    
         print(f"  Total syntelogs: {stats['total']}")
         print(f"  Successfully tested: {stats['tested']}")
-        print(f"  Pairwise comparisons: {stats['comparisons']}")
-        print(f"  Using MAJOR isoform: {stats['major_used']}")
-        print(f"  Using MINOR isoform (fallback): {stats['minor_used']}")
         print(f"  Failed to test: {stats['failed']}")
-        print(f"  Significant comparisons: {len(significant)}")
-        if stats['tested'] > 0:
-            print(f"  Minor fallback rate: {stats['minor_used']/stats['tested']*100:.1f}%")
+
     else:
         print("\nNo results generated!")
     

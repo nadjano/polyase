@@ -105,30 +105,34 @@ def load_ase_data(
 ):
     """Load allele-specific expression data from long-read RNAseq at isoform level.
 
-    Optimized version with parallel loading and vectorized operations.
+    Parameters
+    ----------
+    var_obs_file : str
+        Path to the variant observations file.
+    isoform_counts_dir : str
+        Directory containing the isoform counts files.
+    tx_to_gene_file : str
+        Path to TSV file mapping transcript_id to gene_id.
+    sample_info : dict, optional
+        Dictionary mapping sample IDs to their conditions.
+    counts_file : str, optional
+        Path to additional counts file (salmon merged transcript counts).
+    fillna : int or float, optional
+        Value to fill NA values with.
+    calculate_cpm : bool, optional
+        Whether to calculate CPM (Counts Per Million) from EM counts, by default True.
+    quant_dir : str, optional
+        Directory containing quantification files with EM counts.
+    n_jobs : int, optional
+        Number of parallel jobs for loading samples, by default 4.
 
-    :param var_obs_file: Path to the variant observations file
-    :type var_obs_file: str
-    :param isoform_counts_dir: Directory containing the isoform counts files
-    :type isoform_counts_dir: str
-    :param tx_to_gene_file: Path to TSV file mapping transcript_id to gene_id
-    :type tx_to_gene_file: str
-    :param sample_info: Dictionary mapping sample IDs to their conditions
-    :type sample_info: dict, optional
-    :param counts_file: Path to additional counts file (salmon merged transcript counts). Optional.
-    :type counts_file: str, optional
-    :param fillna: Value to fill NA values with
-    :type fillna: int or float, optional
-    :param calculate_cpm: Whether to calculate CPM (Counts Per Million) from EM counts (default: True)
-    :type calculate_cpm: bool, optional
-    :param quant_dir: Directory containing quantification files with EM counts
-    :type quant_dir: str, optional
-    :param n_jobs: Number of parallel jobs for loading samples (default: 4)
-    :type n_jobs: int, optional
-    :return: AnnData object containing the processed isoform-level data with EM counts and CPM layers.
-        Includes all transcripts from expression matrix and tx2gene mapping, with NaN values
-        for var_obs data when genes are not found in var_obs_file.
-    :rtype: anndata.AnnData
+    Returns
+    -------
+    anndata.AnnData
+        AnnData object containing the processed isoform-level data with EM counts 
+        and CPM layers. Includes all transcripts from expression matrix and tx2gene 
+        mapping, with NaN values for var_obs data when genes are not found in 
+        var_obs_file.
     """
     print("Loading metadata files...")
 
@@ -416,8 +420,19 @@ def load_ase_data(
 def aggregate_transcripts_to_genes(adata_tx):
     """
     Aggregate transcript-level AnnData to gene-level AnnData.
-    Optimized version using vectorized operations and sparse matrices.
+
+    Parameters
+    -----------
+    adata_tx : anndata.AnnData
+        Transcript-level AnnData object with 'gene_id' in adata_tx.var. Must contain layers:
+        'unique_counts', 'ambiguous_counts', 'em_counts', 'unique_cpm',
+    
+    Returns
+    --------
+    anndata.AnnData
+        Gene-level AnnData object with aggregated counts and CPM layers.
     """
+
     # Get unique genes and create mapping
     gene_ids = adata_tx.var['gene_id'].dropna()
     unique_genes = gene_ids.unique()

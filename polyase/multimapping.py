@@ -1,4 +1,4 @@
-"""Utilities for calculating mulitmapping ratios per syntelog."""
+"""Utilities for calculating multimapping ratios per syntelog."""
 
 import numpy as np
 import pandas as pd
@@ -109,10 +109,10 @@ class MultimappingRatioCalculator:
         Returns:
         --------
         ratios : numpy array
-            Array of mulitmapping values for the specified Synt_id
+            Array of multimapping values for the specified Synt_id
         """
         if multi_layer not in self.adata.layers:
-            raise ValueError(f"Mulitmapping layer '{multi_layer}' not found. Calculate ratios first.")
+            raise ValueError(f"Multimapping layer '{multi_layer}' not found. Calculate ratios first.")
 
         mask = self.adata.var['Synt_id'] == synt_id
         return self.adata.layers[multi_layer][:,mask]
@@ -120,7 +120,7 @@ class MultimappingRatioCalculator:
 
 def calculate_multi_ratios(adata, unique_layer='unique_counts', multi_layer='ambiguous_counts'):
     """
-    Calculat emultimapping ratios for each transcript grouped by Synt_id.
+    Calculate multimapping ratios for each transcript grouped by Synt_id.
 
     Parameters:
     -----------

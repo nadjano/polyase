@@ -4,12 +4,6 @@ import pandas as pd
 import numpy as np
 from typing import Optional, List, Union, Tuple
 
-import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
-import numpy as np
-from typing import Optional, List, Union, Tuple
-
 def plot_allelic_ratios(
     adata,
     synteny_category: str,
@@ -207,7 +201,7 @@ def plot_allelic_ratios(
 
 def plot_top_differential_syntelogs(results_df, n=5, figsize=(16, 12), palette=None, jitter=0.2, alpha=0.7,
                                    ylim=None, sort_by='p_value', output_file=None, sig_threshold=0.05,
-                                   difference_threshold=0.1, sig_color='red', plot_type='ratios'):
+                                   ratio_difference_threshold=0.1, sig_color='red', plot_type='ratios'):
     """
     Plot the top n syntelogs with differential allelic ratios or CPM values in a grid layout (6 plots per row).
     Syntelogs with significant differences will have their titles highlighted in red.
@@ -234,7 +228,7 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(16, 12), palette=N
         Path to save the figure (default: None, displays figure but doesn't save)
     sig_threshold : float, optional
         Significance threshold for p-value or FDR (default: 0.05)
-    difference_threshold : float, optional
+    ratio_difference_threshold : float, optional
         Ratio difference threshold for significance (default: 0.1)
     sig_color : str, optional
         Color for titles of syntelogs with significant differences (default: 'red')
@@ -297,7 +291,7 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(16, 12), palette=N
     if not condition_columns:
         print(f"No {value_prefix} columns found in dataframe")
         # Try to fall back to ratios if CPM was requested but not available
-        if plot_type == 'cmp':
+        if plot_type == 'cpm':
             print("Falling back to ratios...")
             condition_columns = [col for col in results_df.columns if col.startswith('ratios_rep_')]
             if condition_columns:
@@ -440,7 +434,7 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(16, 12), palette=N
         # Determine if this syntelog has a significant difference
         is_significant = False
         if 'FDR' in synt_data.columns and not np.isnan(fdr):
-            is_significant = (fdr <= sig_threshold) & (ratio_difference > difference_threshold)
+            is_significant = (fdr <= sig_threshold) & (ratio_difference > ratio_difference_threshold)
         else:
             is_significant = p_value <= sig_threshold
 
@@ -492,7 +486,7 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(16, 12), palette=N
     return fig
 
 
-def plot_top_differential_isoforms(results_df, n=5, figsize=(16, 12), palette=None, jitter=0.2, alpha=0.7, ylim=(0, 1), sort_by='p_value', output_file=None, sig_threshold=0.05, difference_threshold=0.05, sig_color='red'):
+def plot_top_differential_isoforms(results_df, n=5, figsize=(16, 12), palette=None, jitter=0.2, alpha=0.7, ylim=(0, 1), sort_by='p_value', output_file=None, sig_threshold=0.05, ratio_difference_threshold=0.2, sig_color='red'):
     """
     Plot the top n genes with differential isoform usage in a grid layout (3 plots per row).
     Genes with significant differences will have their titles highlighted in red.
@@ -519,6 +513,8 @@ def plot_top_differential_isoforms(results_df, n=5, figsize=(16, 12), palette=No
         Path to save the figure (default: None, displays figure but doesn't save)
     sig_threshold : float, optional
         Significance threshold for p-value or FDR (default: 0.05)
+    ratio_difference_threshold : float, optional
+        Ratio difference threshold for significance (default: 0.2)
     sig_color : str, optional
         Color for titles of genes with significant differences (default: 'red')
 
@@ -628,13 +624,10 @@ def plot_top_differential_isoforms(results_df, n=5, figsize=(16, 12), palette=No
             palette=palette,
             ax=ax
         )
-
-
         # Add mean values as horizontal lines for each isoform and condition
         i = 0
         for isoform in gene_data['isoform_number'].unique():
             isoform_pos = list(gene_data['isoform_number'].unique()).index(isoform)
-            #xax.text(x=isoform_pos-0.1 , y=0.9, s=pvalue_asterisks[i])
             i = i+1
             for j, cond in enumerate(conditions):
                 mean_col = f'ratios_{cond}_mean'
@@ -653,10 +646,10 @@ def plot_top_differential_isoforms(results_df, n=5, figsize=(16, 12), palette=No
         fdr_text = f", FDR = {fdr:.2e}" if not np.isnan(fdr) else ""
         p_value_text = f", p = {p_value:.2e}"
 
-        # Determine if this gebe has a significant difference
+        # Determine if this gene has a significant difference
         is_significant = False
         if 'FDR' in gene_data.columns and not np.isnan(fdr):
-            is_significant = (fdr <= sig_threshold) & (ratio_difference > difference_threshold)
+            is_significant = (fdr <= sig_threshold) & (ratio_difference > ratio_difference_threshold)
         else:
             is_significant = p_value <= sig_threshold
 
@@ -700,324 +693,11 @@ def convert_pvalue_to_asterisks(pvalue):
     else:
         return ""
 
-
-def plot_isoform_diu_results(
-    results_df,
-    adata=None,
-    n=6,
-    figsize=(18, 12),
-    palette=None,
-    jitter=0.2,
-    alpha=0.7,
-    ylim=(0, 1),
-    sort_by='p_value',
-    output_file=None,
-    sig_threshold=0.05,
-    difference_threshold=0.1,
-    sig_color='red',
-    show_raw_counts=False,
-    layer='unique_counts',
-    test_condition='control'
-):
-    """
-    Plot the top n syntelogs with differential isoform usage between alleles/haplotypes.
-
-    Parameters
-    -----------
-    results_df : pd.DataFrame
-        Results dataframe from test_isoform1_DIU_between_alleles function
-    adata : AnnData, optional
-        Original AnnData object containing expression data (needed if show_raw_counts=True)
-    n : int, optional
-        Number of top syntelogs to plot (default: 6)
-    figsize : tuple, optional
-        Figure size as (width, height) in inches (default: (18, 12))
-    palette : dict or None, optional
-        Color palette for haplotypes (default: None, uses seaborn defaults)
-    jitter : float, optional
-        Amount of jitter for strip plot (default: 0.2)
-    alpha : float, optional
-        Transparency of points (default: 0.7)
-    ylim : tuple, optional
-        Y-axis limits for isoform ratios (default: (0, 1))
-    sort_by : str, optional
-        Column to sort results by ('p_value', 'FDR', or 'ratio_difference') (default: 'p_value')
-    output_file : str, optional
-        Path to save the figure (default: None, displays figure but doesn't save)
-    sig_threshold : float, optional
-        Significance threshold for p-value or FDR (default: 0.05)
-    difference_threshold : float, optional
-        Minimum ratio difference threshold (default: 0.1)
-    sig_color : str, optional
-        Color for titles of syntelogs with significant differences (default: 'red')
-    show_raw_counts : bool, optional
-        Whether to show raw counts in addition to ratios (default: False)
-    layer : str, optional
-        Layer to use for raw counts if show_raw_counts=True (default: 'unique_counts')
-    test_condition : str, optional
-        Condition to filter samples for if show_raw_counts=True (default: 'control')
-
-    Returns
-    --------
-    fig : matplotlib.figure.Figure
-        The generated figure
-    """
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    import pandas as pd
-    import numpy as np
-    import math
-    import re
-
-    if len(results_df) == 0:
-        print("No results to plot")
-        return None
-
-    # Validate sort_by parameter
-    if sort_by not in ['p_value', 'FDR', 'ratio_difference']:
-        print(f"Invalid sort_by parameter '{sort_by}'. Using 'p_value' instead.")
-        sort_by = 'p_value'
-
-    # Ensure FDR column exists
-    if 'FDR' not in results_df.columns and sort_by == 'FDR':
-        print("FDR column not found. Using p_value for sorting.")
-        sort_by = 'p_value'
-
-    # Determine sorting order
-    ascending_bool = True if sort_by != 'ratio_difference' else False
-
-    # Get top n syntelogs
-    top_syntelogs = results_df.sort_values(sort_by, ascending=ascending_bool).head(n)['Synt_id'].unique()
-
-    # Filter results to include only these syntelogs
-    top_results = results_df[results_df['Synt_id'].isin(top_syntelogs)]
-
-    # Calculate grid dimensions - 3 plots per row
-    cols = 3
-    rows = math.ceil(len(top_syntelogs) / cols)
-
-    # Adjust figure size based on whether we're showing raw counts
-    if show_raw_counts and adata is not None:
-        figsize = (figsize[0], figsize[1] * 1.5)  # Make taller for subplots
-
-    # Create the figure with grid layout
-    fig, axes = plt.subplots(rows, cols, figsize=figsize)
-
-    # Convert axes to flattened array for easier indexing
-    if rows == 1 and cols == 1:
-        axes = np.array([axes])
-    elif rows == 1 or cols == 1:
-        axes = axes.flatten()
-    else:
-        axes = axes.flatten()
-
-    # Set default palette if none provided
-    if palette is None:
-        palette = sns.color_palette("Set2", n_colors=10)
-
-    # Plot each syntelog
-    for i, synt_id in enumerate(top_syntelogs):
-        # Get data for this syntelog
-        synt_data = top_results[top_results['Synt_id'] == synt_id].iloc[0]
-
-        # Extract information
-        target_isoform = synt_data['target_isoform']
-        min_hap = synt_data['min_ratio_haplotype']
-        max_hap = synt_data['max_ratio_haplotype']
-        min_transcript = synt_data['min_ratio_transcript_id']
-        max_transcript = synt_data['max_ratio_transcript_id']
-        p_value = synt_data['p_value']
-        fdr = synt_data['FDR'] if 'FDR' in synt_data else np.nan
-        ratio_difference = synt_data['ratio_difference']
-
-        # Get mean ratios
-        min_ratio = synt_data[f'ratio_{min_hap}_mean']
-        max_ratio = synt_data[f'ratio_{max_hap}_mean']
-
-        ax = axes[i]
-
-        # If we have access to the original data, plot individual sample points
-        if show_raw_counts and adata is not None:
-            try:
-                # Get sample indices for the condition
-                if test_condition == "all":
-                    condition_indices = np.arange(adata.shape[0])
-                else:
-                    condition_indices = np.where(adata.obs['condition'] == test_condition)[0]
-
-                # Find transcript indices
-                min_transcript_idx = np.where(adata.var_names == min_transcript)[0]
-                max_transcript_idx = np.where(adata.var_names == max_transcript)[0]
-
-                if len(min_transcript_idx) > 0 and len(max_transcript_idx) > 0:
-                    min_transcript_idx = min_transcript_idx[0]
-                    max_transcript_idx = max_transcript_idx[0]
-
-                    # Get counts for both transcripts
-                    counts = adata.layers[layer]
-
-                    # Get all transcripts for this syntelog to calculate total counts per haplotype
-                    synt_mask = adata.var['Synt_id'] == synt_id
-                    synt_indices = np.where(synt_mask)[0]
-
-                    # Calculate ratios for each sample
-                    plot_data = []
-
-                    for hap, transcript_idx in [(min_hap, min_transcript_idx), (max_hap, max_transcript_idx)]:
-                        # Get haplotype-specific transcript indices
-                        hap_mask = (adata.var['Synt_id'] == synt_id) & (adata.var['haplotype'] == hap)
-                        hap_indices = np.where(hap_mask)[0]
-
-                        for sample_idx in condition_indices:
-                            # Get counts for this specific transcript
-                            isoform_count = counts[sample_idx, transcript_idx]
-
-                            # Get total counts for this haplotype
-                            hap_total = np.sum(counts[sample_idx, hap_indices])
-
-                            # Calculate ratio
-                            if hap_total > 0:
-                                ratio = isoform_count / hap_total
-                            else:
-                                ratio = 0
-
-                            plot_data.append({
-                                'haplotype': hap,
-                                'ratio': ratio,
-                                'sample': adata.obs_names[sample_idx]
-                            })
-
-                    # Convert to DataFrame and plot
-                    plot_df = pd.DataFrame(plot_data)
-
-                    if len(plot_df) > 0:
-                        sns.stripplot(
-                            data=plot_df,
-                            x='haplotype',
-                            y='ratio',
-                            jitter=jitter,
-                            alpha=alpha,
-                            palette=palette,
-                            ax=ax,
-                            size=6
-                        )
-
-                        # Add mean lines
-                        hap_order = [min_hap, max_hap]
-                        means = [min_ratio, max_ratio]
-
-                        for j, (hap, mean_val) in enumerate(zip(hap_order, means)):
-                            ax.hlines(
-                                y=mean_val,
-                                xmin=j-0.3,
-                                xmax=j+0.3,
-                                colors='red',
-                                linewidth=3,
-                                alpha=0.8
-                            )
-
-            except Exception as e:
-                print(f"Could not plot individual points for syntelog {synt_id}: {e}")
-                # Fall back to bar plot
-                show_raw_counts = False
-
-        # If we can't show individual points, show a bar plot of mean ratios
-        if not show_raw_counts or adata is None:
-            # Get all haplotypes and their ratios for this syntelog
-            all_haplotypes = synt_data['all_haplotypes'] if 'all_haplotypes' in synt_data else [min_hap, max_hap]
-
-            # Extract ratios for all haplotypes
-            haplotype_ratios_dict = {}
-            for hap in all_haplotypes:
-                ratio_col = f'ratio_{hap}_mean'
-                if ratio_col in synt_data:
-                    haplotype_ratios_dict[hap] = synt_data[ratio_col]
-
-            # If we don't have all haplotype data, fall back to min/max
-            if not haplotype_ratios_dict:
-                haplotype_ratios_dict = {min_hap: min_ratio, max_hap: max_ratio}
-
-            # Sort haplotypes by ratio for better visualization
-            sorted_haps = sorted(haplotype_ratios_dict.keys(), key=lambda x: haplotype_ratios_dict[x])
-            haplotypes = sorted_haps
-            ratios = [haplotype_ratios_dict[hap] for hap in sorted_haps]
-
-            # Create color palette - highlight min and max haplotypes
-            colors = []
-            for hap in haplotypes:
-                if hap == min_hap:
-                    colors.append('lightcoral')  # Min ratio in red
-                elif hap == max_hap:
-                    colors.append('lightgreen')  # Max ratio in green
-                else:
-                    colors.append('lightgray')   # Other haplotypes in gray
-
-            bars = ax.bar(haplotypes, ratios, color=colors, alpha=0.7, edgecolor='black')
-
-            # Add value labels on bars
-            for bar, ratio in zip(bars, ratios):
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                       f'{ratio:.3f}', ha='center', va='bottom', fontweight='bold', fontsize=8)
-
-        # Determine if this syntelog is significant
-        is_significant = False
-        if 'FDR' in synt_data and not pd.isna(fdr):
-            is_significant = (fdr <= sig_threshold) and (ratio_difference >= difference_threshold)
-        else:
-            is_significant = (p_value <= sig_threshold) and (ratio_difference >= difference_threshold)
-
-        # Format title with statistics
-        fdr_text = f", FDR = {fdr:.2e}" if not pd.isna(fdr) else ""
-        title_color = sig_color if is_significant else 'black'
-
-        ax.set_title(
-            f"Syntelog {synt_id}, Isoform {target_isoform}\np = {p_value:.2e}{fdr_text}\nΔratio = {ratio_difference:.3f}",
-            color=title_color,
-            fontsize=10
-        )
-
-        ax.set_xlabel('Haplotype')
-        ax.set_ylabel(f'Isoform {target_isoform} Usage Ratio')
-        ax.set_ylim(ylim)
-        ax.grid(True, alpha=0.3)
-
-        # Rotate x-axis labels if they're long
-        if max(len(str(min_hap)), len(str(max_hap))) > 8:
-            ax.tick_params(axis='x', rotation=45)
-
-    # Hide unused subplots
-    for j in range(len(top_syntelogs), rows * cols):
-        if j < len(axes):
-            axes[j].set_visible(False)
-
-    # Add overall title
-    fig.suptitle(
-        f'Top {len(top_syntelogs)} Syntelogs with Differential Isoform Usage Between Alleles\n'
-        f'(sorted by {sort_by})',
-        fontsize=16,
-        y=0.98
-    )
-
-    plt.tight_layout()
-
-    # Save figure if requested
-    if output_file:
-        plt.savefig(output_file, dpi=300, bbox_inches='tight')
-        print(f"Figure saved to {output_file}")
-
-    #return fig
-
-
-
-
-
-
 def plot_differential_isoform_usage(
     results_df,
     annotation_df,
     fdr_threshold=0.05,
-    ratio_difference_threshold=0.1,
+    ratio_difference_threshold=0.2,
     width=1300,
     height=350,
     template="simple_white"
@@ -1047,7 +727,7 @@ def plot_differential_isoform_usage(
         Plus standard GTF columns for RNApysoforms
     fdr_threshold : float, default=0.05
         FDR threshold for identifying significant genes (applied at gene level)
-    ratio_difference_threshold : float, default=0.1
+    ratio_difference_threshold : float, default=0.2
         Minimum ratio difference threshold for identifying significant genes (applied at gene level)
     width : int, default=1300
         Plot width in pixels
@@ -1103,23 +783,17 @@ def plot_differential_isoform_usage(
     if missing_cols:
         raise ValueError(f"Missing required columns in results_df: {missing_cols}")
 
-    # Filter results if thresholds provided - identify significant genes
     significant_genes = set()
 
-    # Find genes with at least one significant isoform
-    if 'FDR' in results_df.columns:
+    # Check if both columns exist
+    if 'FDR' in results_df.columns and 'ratio_difference' in results_df.columns:
+        # Filter for rows that meet BOTH criteria
         significant_genes.update(
-            results_df[results_df['FDR'] <= fdr_threshold]['gene_id'].unique()
+            results_df[
+                (results_df['FDR'] <= fdr_threshold) & 
+                (results_df['ratio_difference'] >= ratio_difference_threshold)
+            ]['gene_id'].unique()
         )
-
-    if 'ratio_difference' in results_df.columns:
-        significant_genes.update(
-            results_df[results_df['ratio_difference'] >= ratio_difference_threshold]['gene_id'].unique()
-        )
-
-    # If no filtering columns are present, include all genes
-    if 'FDR' not in results_df.columns and 'ratio_difference' not in results_df.columns:
-        significant_genes = set(results_df['gene_id'].unique())
 
     # Filter to only include data for significant genes (but keep all isoforms of those genes)
     filtered_df = results_df[results_df['gene_id'].isin(significant_genes)].copy()

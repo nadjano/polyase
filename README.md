@@ -21,9 +21,19 @@ To create a conda environemnt for running juypter notebook:
 
 <pre><code>conda create -n polyase python=3.12 ipykernel pip && conda activate polyase && pip install polyase && pip install pyranges</code></pre>
 
-If you get an error regarding the installation of pyranges (a known issue on mac and windows).
-Then try to install it via conda:
-`conda install -c bioconda pyranges`
+
+
+### Troubleshooting
+
+if you get an error installing polyase with pip for some dependencies, e.g.:
+
+- pyranges (a known issue on mac and windows).
+- Failed to build llvmlit and numba
+
+```
+conda install -c conda-forge numba
+conda install -c bioconda pyranges
+```
 
 ## Tutorial
 

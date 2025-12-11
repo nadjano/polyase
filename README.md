@@ -15,12 +15,15 @@ You can install polyase using pip:
 
 <pre><code>pip install polyase</code></pre>
 
-Pyranges must be installed manually for reading GTF files.
+Pyranges must be installed manually for reading GTF files (most of the analysis can be run without pyranges).
 
 To create a conda environemnt for running juypter notebook:
 
 <pre><code>conda create -n polyase python=3.12 ipykernel pip && conda activate polyase && pip install polyase && pip install pyranges</code></pre>
 
+If you get an error regarding the installation of pyranges (a known issue on mac and windows).
+Then try to install it via conda:
+`conda install -c bioconda pyranges`
 
 ## Tutorial
 

@@ -10,10 +10,13 @@ The notebook is available `here <https://github.com/nadjano/polyase/blob/master/
 
 Create an conda environment that also inlcude ipykernel to run jupyter notebooks:
 
-`conda create -n polyase python=3.12 ipykernel pip && conda activate polyase && pip install polyase`
+`conda create -n polyase python=3.12 ipykernel pip && conda activate polyase && pip install polyase && pip install pyranges`
 
-Also install pyragnes
-`pip install pyragnes`
+If you get an error regarding the installation of pyranges (a known issue on mac and windows).
+Then try to install it via conda:
+`conda install -c bioconda pyranges`
+
+
 
 .. raw:: html
    :file: _static/potato_polyase.html

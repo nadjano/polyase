@@ -29,7 +29,7 @@ An environment with nextflow (>=24.04.2) and Singularity installed.
 
 *Important*: for converting output to html poppler also need to be installed: ``conda install poppler``
 
-- Clone the `SQANTI3 git repository <https://github.com/ConesaLab/SQANTI3>`_ and provide the directory as input. v >=5.5.1
+- Clone the `SQANTI3 git repository <https://github.com/ConesaLab/SQANTI3>`_ and provide the directory as input. v ==5.5.4
 
 For running Centrifuge, you also need to create a `Centrifuge database <https://ccb.jhu.edu/software/centrifuge/manual.shtml>`_.
 

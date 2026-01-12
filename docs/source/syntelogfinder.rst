@@ -89,6 +89,25 @@ The ``params.json`` should look like this::
         "outdir": "output_path"
     }
 
+Running Syntelogfinder on test data
+-----------------------------------
+
+After downloading the fasta and gtf file and preperation of the parameter file the pipeline can be run like this:
+
+.. code-block:: bash
+
+   git clone https://github.com/NIB-SI/syntelogfinder.git --branch v1.0.0
+   cd syntelogfinder
+   conda create -n nextflow -c bioconda nextflow 
+   conda activate nextflow
+   nextflow run main.nf \
+     -params-file params/params_test.json \
+     -profile singularity \
+     --run_blast \
+     -resume 
+
+**Expected runtime:** 10 minutes (if all singularity images are already pulled)
+
 
 Tutorial
 --------

@@ -1480,14 +1480,6 @@ def _match_all_isoforms_for_plotting(
     minor_isoform,
     min_similarity_for_matching=0.4
 ):
-    """
-    Match ALL reference isoforms (including zero-expressed ones) to isoforms in other haplotypes.
-    
-    Returns
-    -------
-    dict
-        Key: (haplotype, ref_isoform_id), Value: {'transcript_idx', 'transcript_id', 'similarity'}
-    """
     import numpy as np
     
     matches = {}
@@ -1499,51 +1491,54 @@ def _match_all_isoforms_for_plotting(
         if len(hap_indices) == 0:
             continue
         
-        # For each reference isoform, find best match in this haplotype
-        for ref_iso in all_ref_isoforms:
-            ref_iso_id = ref_iso['transcript_id']
-            ref_exon_struct = ref_iso['exon_structure']
-            ref_intron_struct = ref_iso['intron_structure']
-            
-            # If this is the reference haplotype, use direct match
-            if hap == reference_haplotype:
-                matches[(hap, ref_iso_id)] = {
+        if hap == reference_haplotype:
+            for ref_iso in all_ref_isoforms:
+                matches[(hap, ref_iso['transcript_id'])] = {
                     'transcript_idx': ref_iso['transcript_idx'],
-                    'transcript_id': ref_iso_id,
+                    'transcript_id': ref_iso['transcript_id'],
                     'similarity': 1.0
                 }
-                continue
-            
-            # Find best matching transcript in this haplotype
-            best_match_idx = None
-            best_similarity = 0.0
-            
+            continue
+        
+        # Build full similarity matrix: ref_isoform x hap_transcript
+        similarity_matrix = {}
+        for ref_iso in all_ref_isoforms:
+            ref_iso_id = ref_iso['transcript_id']
             for idx in hap_indices:
                 tid = transcript_ids[idx]
                 exon_struct = exon_lengths_dict.get(tid, [])
                 intron_struct = intron_lengths_dict.get(tid, [])
                 
                 similarity = _calculate_combined_structure_similarity(
-                    ref_exon_struct, exon_struct,
-                    ref_intron_struct, intron_struct
+                    ref_iso['exon_structure'], exon_struct,
+                    ref_iso['intron_structure'], intron_struct
                 )
-                
-                if similarity > best_similarity:
-                    best_similarity = similarity
-                    best_match_idx = idx
+                similarity_matrix[(ref_iso_id, idx)] = similarity
+        
+        # Greedy assignment: best similarity pair first, no reuse of hap transcripts
+        assigned_hap_transcripts = set()
+        assigned_ref_isoforms = set()
+        
+        # Sort all pairs by similarity descending
+        sorted_pairs = sorted(similarity_matrix.items(), key=lambda x: x[1], reverse=True)
+        
+        for (ref_iso_id, idx), similarity in sorted_pairs:
+            if ref_iso_id in assigned_ref_isoforms:
+                continue
+            if idx in assigned_hap_transcripts:
+                continue
+            if similarity < min_similarity_for_matching:
+                continue  # remaining pairs will only be worse
             
-            # Only add if similarity meets threshold
-            if best_match_idx is not None and best_similarity >= min_similarity_for_matching:
-                matches[(hap, ref_iso_id)] = {
-                    'transcript_idx': best_match_idx,
-                    'transcript_id': transcript_ids[best_match_idx],
-                    'similarity': best_similarity
-                }
+            matches[(hap, ref_iso_id)] = {
+                'transcript_idx': idx,
+                'transcript_id': transcript_ids[idx],
+                'similarity': similarity
+            }
+            assigned_hap_transcripts.add(idx)
+            assigned_ref_isoforms.add(ref_iso_id)
     
     return matches
-
-
-
 
 def _identify_major_minor_isoforms(
     synt_indices, haplotypes, transcript_ids,
@@ -1775,96 +1770,6 @@ def _calculate_combined_structure_similarity(
     
     # Ensure the result is bounded between 0 and 1
     return max(0.0, min(1.0, combined_sim))
-
-
-def _calculate_length_based_similarity(lengths1, lengths2, tolerance=10):
-    """
-    Calculate similarity between two genomic structures based on element counts and lengths.
-    
-    Parameters
-    ----------
-    lengths1, lengths2 : list of int
-        Lengths of genomic elements (exons or introns)
-    tolerance : int, default=10
-        Base pair tolerance for length comparison
-    
-    Returns
-    -------
-    float
-        Similarity score between 0 and 1
-    """
-    if not lengths1 or not lengths2:
-        return 0.0
-    
-    # Ensure we're working with lists
-    if not isinstance(lengths1, list):
-        lengths1 = [lengths1]
-    if not isinstance(lengths2, list):
-        lengths2 = [lengths2]
-    
-    # Component 1: Check if the number of elements is the same
-    count1 = len(lengths1)
-    count2 = len(lengths2)
-    
-    # Penalize heavily for different counts
-    if count1 != count2:
-        count_similarity = 1.0 - abs(count1 - count2) / max(count1, count2)
-        # If counts differ significantly, return low similarity
-        if count_similarity < 0.5:
-            return count_similarity * 0.5  # Max 0.25 if counts differ a lot
-    else:
-        count_similarity = 1.0
-    
-    # Component 2: Calculate length similarity for corresponding elements
-    # Sort lengths to compare corresponding elements by size
-    lengths1_sorted = sorted(lengths1)
-    lengths2_sorted = sorted(lengths2)
-    
-    # Compare corresponding lengths (pair shortest with shortest, etc.)
-    n_comparisons = min(len(lengths1_sorted), len(lengths2_sorted))
-    
-    if n_comparisons == 0:
-        return 0.0
-    
-    length_similarities = []
-    for i in range(n_comparisons):
-        len1 = lengths1_sorted[i]
-        len2 = lengths2_sorted[i]
-        
-        # Calculate absolute difference
-        diff = abs(len1 - len2)
-        
-        # Apply tolerance: differences within tolerance have no penalty
-        if diff <= tolerance:
-            similarity = 1.0
-        else:
-            # Calculate similarity based on relative difference beyond tolerance
-            adjusted_diff = diff - tolerance
-            avg_length = (len1 + len2) / 2
-            # Use exponential decay for penalty to avoid harsh drops
-            similarity = max(0.0, 1.0 - (adjusted_diff / avg_length))
-        
-        length_similarities.append(similarity)
-    
-    # Average length similarity
-    avg_length_similarity = sum(length_similarities) / n_comparisons
-    
-    # Penalize for extra elements (if counts differ)
-    if count1 != count2:
-        extra_elements = abs(count1 - count2)
-        penalty = extra_elements / max(count1, count2) * 0.2  # 20% penalty per extra element
-        avg_length_similarity *= (1 - penalty)
-    
-    # Combine count and length similarity
-    # Give more weight to length similarity if counts match
-    if count1 == count2:
-        final_similarity = 0.2 * count_similarity + 0.8 * avg_length_similarity
-    else:
-        final_similarity = 0.5 * count_similarity + 0.5 * avg_length_similarity
-    
-    # Ensure the result is bounded between 0 and 1
-    return max(0.0, min(1.0, final_similarity))
-
 
 
 def _calculate_length_based_similarity(lengths1, lengths2, tolerance=10):

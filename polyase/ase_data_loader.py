@@ -544,7 +544,8 @@ def aggregate_transcripts_to_genes(adata_tx):
 
     # --- Per-Synt_id: flag whether all transcripts share the same length ---
     if 'Synt_id' in adata_tx.var.columns and 'tx_length' in adata_tx.var.columns:
-        synt_tx = adata_tx.var[['gene_id', 'Synt_id', 'tx_length']].dropna(subset=['Synt_id', 'tx_length'])
+        # Use the same filtered subset (tx_var_valid) used for other gene-level aggregations
+        synt_tx = tx_var_valid[['gene_id', 'Synt_id', 'tx_length']].dropna(subset=['Synt_id', 'tx_length'])
         synt_length_nunique = synt_tx.groupby('Synt_id')['tx_length'].nunique()
         synt_uniform = synt_length_nunique.map(lambda n: 'uniform_length' if n == 1 else 'variable_length')
         gene_synt = tx_var_valid[['gene_id', 'Synt_id']].drop_duplicates('gene_id').set_index('gene_id')

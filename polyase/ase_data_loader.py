@@ -12,10 +12,11 @@ def _load_sample_counts(sample_id, condition, isoform_counts_dir, quant_dir, fil
     Load counts for a single sample - designed for parallel execution.
     """
     result = {
-        'sample_id': sample_id,
-        'ambig_counts': None,
-        'unique_counts': None,
-        'em_counts': None
+    'sample_id': sample_id,
+    'ambig_counts': None,
+    'unique_counts': None,
+    'em_counts': None,
+    'tx_lengths': None          
     }
 
     # Look for isoform-specific files with multiple naming patterns
@@ -79,10 +80,14 @@ def _load_sample_counts(sample_id, condition, isoform_counts_dir, quant_dir, fil
                 print("Oarfish quant.sf format detected")
                 em_df = em_df.set_index('tname')
                 result['em_counts'] = em_df['num_reads']
+                if 'len' in em_df.columns:              
+                        result['tx_lengths'] = em_df['len'] 
             elif 'Name' in em_df.columns and 'NumReads' in em_df.columns:
                 print("Salmon quant.sf format detected")
                 em_df = em_df.set_index('Name')
                 result['em_counts'] = em_df['NumReads']
+                if 'len' in em_df.columns:              
+                    result['tx_lengths'] = em_df['len'] 
             else:
                 print(f"Warning: Expected columns not found in {quant_file_path}")
         except Exception as e:
@@ -211,6 +216,16 @@ def load_ase_data(
     for df in [ambig_counts, unique_counts, em_counts]:
         if not df.empty:
             all_transcript_ids.update(df.index)
+    
+    # Extract transcript lengths from first sample that has them
+    tx_lengths = None
+    for result in sample_results.values():
+        if result.get('tx_lengths') is not None:
+            tx_lengths = result['tx_lengths']
+            print(f"Found transcript lengths from sample '{result['sample_id']}'")
+            break
+    if tx_lengths is None:
+        print("No transcript length data found in any quant.sf file")
 
     print("Creating isoform metadata...")
 
@@ -219,6 +234,12 @@ def load_ase_data(
     isoform_var['transcript_id'] = isoform_var.index
     isoform_var['gene_id'] = isoform_var['transcript_id'].map(tx_to_gene_dict)
     isoform_var['feature_type'] = 'transcript'
+
+    # Add transcript lengths if available
+    if tx_lengths is not None:
+        isoform_var['tx_length'] = isoform_var.index.map(tx_lengths)
+        n_with_length = isoform_var['tx_length'].notna().sum()
+        print(f"Added 'tx_length' to .var for {n_with_length}/{len(isoform_var)} transcripts")
 
     # Add var_obs data for ALL transcripts, using NaN for missing genes
     print(f"Adding var_obs annotations for {len(all_transcript_ids)} transcripts...")
@@ -460,7 +481,7 @@ def aggregate_transcripts_to_genes(adata_tx):
 
     # Vectorized aggregation for all layers
     layers_to_aggregate = ['unique_counts', 'ambiguous_counts', 'em_counts',
-                          'em_cpm', 'unique_cpm', 'ambiguous_cpm']
+                           'em_cpm', 'unique_cpm', 'ambiguous_cpm']
 
     aggregated_layers = {}
 
@@ -471,7 +492,11 @@ def aggregate_transcripts_to_genes(adata_tx):
     # Aggregate all layers
     for layer_name in layers_to_aggregate:
         if layer_name in adata_tx.layers:
-            layer_sparse = sparse.csr_matrix(adata_tx.layers[layer_name]) if not sparse.issparse(adata_tx.layers[layer_name]) else adata_tx.layers[layer_name]
+            layer_sparse = (
+                sparse.csr_matrix(adata_tx.layers[layer_name])
+                if not sparse.issparse(adata_tx.layers[layer_name])
+                else adata_tx.layers[layer_name]
+            )
 
             if 'ambiguous' in layer_name and 'cpm' not in layer_name:
                 # For ambiguous counts, take mean
@@ -488,7 +513,7 @@ def aggregate_transcripts_to_genes(adata_tx):
     gene_var['gene_id'] = unique_genes
     gene_var['feature_type'] = 'gene'
 
-    # Aggregate metadata using groupby (more efficient than loops)
+    # Aggregate metadata using groupby
     gene_metadata_cols = [
         'transcript_id', 'Synt_id', 'synteny_category', 'syntenic_genes',
         'haplotype', 'CDS_length_category', 'CDS_percent_difference',
@@ -502,6 +527,39 @@ def aggregate_transcripts_to_genes(adata_tx):
         if col in adata_tx.var.columns:
             gene_metadata = tx_var_valid.groupby('gene_id')[col].first()
             gene_var[col] = gene_metadata.reindex(unique_genes)
+
+    # --- Aggregate transcript lengths if available ---
+    if 'tx_length' in adata_tx.var.columns:
+        length_stats = tx_var_valid.groupby('gene_id')['tx_length'].agg(
+            mean_tx_length='mean',
+            min_tx_length='min',
+            max_tx_length='max'
+        )
+        gene_var['mean_tx_length'] = length_stats['mean_tx_length'].reindex(unique_genes)
+        gene_var['min_tx_length']  = length_stats['min_tx_length'].reindex(unique_genes)
+        gene_var['max_tx_length']  = length_stats['max_tx_length'].reindex(unique_genes)
+        print("Added mean/min/max transcript length columns to gene .var")
+    else:
+        print("No 'tx_length' column found in transcript .var, skipping length aggregation")
+
+    # --- Per-Synt_id: flag whether all transcripts share the same length ---
+    if 'Synt_id' in adata_tx.var.columns and 'tx_length' in adata_tx.var.columns:
+        # Use the same filtered subset (tx_var_valid) used for other gene-level aggregations
+        synt_tx = tx_var_valid[['gene_id', 'Synt_id', 'tx_length']].dropna(subset=['Synt_id', 'tx_length'])
+        synt_length_nunique = synt_tx.groupby('Synt_id')['tx_length'].nunique()
+        synt_uniform = synt_length_nunique.map(lambda n: 'uniform_length' if n == 1 else 'variable_length')
+        gene_synt = tx_var_valid[['gene_id', 'Synt_id']].drop_duplicates('gene_id').set_index('gene_id')
+        gene_var['synt_length_category'] = (
+            gene_synt['Synt_id']
+            .map(synt_uniform)
+            .reindex(unique_genes)
+        )
+        counts = gene_var['synt_length_category'].value_counts()
+        print(f"synt_length_category: {counts.to_dict()}")
+    elif 'Synt_id' not in adata_tx.var.columns:
+        print("No 'Synt_id' column found, skipping synt_length_category")
+    elif 'tx_length' not in adata_tx.var.columns:
+        print("No 'tx_length' column found, skipping synt_length_category")
 
     # Create gene-level AnnData
     adata_gene = ad.AnnData(

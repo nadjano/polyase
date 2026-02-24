@@ -6,7 +6,7 @@ visualizing allele-specific expression patterns, and statistical testing
 of allelic imbalance in polyploid plant genomes.
 """
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 __author__ = "Nadja Nolte"
 
 from .allele_utils import AlleleRatioCalculator, calculate_allelic_ratios

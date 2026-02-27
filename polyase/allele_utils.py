@@ -154,7 +154,7 @@ class AlleleRatioCalculator:
             raise ValueError(f"Ratio layer '{ratio_layer}' not found. Calculate ratios first.")
 
         mask = self.adata.var['Synt_id'] == synt_id
-        return self.adata.layers[ratio_layer][mask]
+        return self.adata.layers[ratio_layer][:, mask]
 
 
 def calculate_allelic_ratios(adata, counts_layer='unique_counts'):

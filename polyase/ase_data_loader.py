@@ -87,7 +87,7 @@ def _load_sample_counts(sample_id, condition, isoform_counts_dir, quant_dir, fil
                 em_df = em_df.set_index('Name')
                 result['em_counts'] = em_df['NumReads']
                 if 'len' in em_df.columns:              
-                    result['tx_lengths'] = em_df['len'] 
+                    result['tx_lengths'] = em_df['Length'] 
             else:
                 print(f"Warning: Expected columns not found in {quant_file_path}")
         except Exception as e:

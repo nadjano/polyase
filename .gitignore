@@ -17,3 +17,4 @@ venv/
 ENV/
 .notebooks/long_readRNA_seq_isoform_counts_allele_desiree.ipynb
 .pypric
+.claude/settings.json

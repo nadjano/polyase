@@ -486,6 +486,484 @@ def plot_top_differential_syntelogs(results_df, n=5, figsize=(16, 12), palette=N
     return fig
 
 
+def plot_top_differential_syntelogs_annotated(results_df, n=5, figsize=(16, 12), palette=None, jitter=0.2, alpha=0.7,
+                                               ylim=None, sort_by='p_value', output_file=None, sig_threshold=0.05,
+                                               ratio_difference_threshold=0.1, sig_color='red', plot_type='ratios',
+                                               log2fc_threshold=1.0):
+    """
+    Plot the top n syntelogs with significance brackets between alleles based on test results.
+
+    Handles two input formats:
+    - Per-allele format (from test_allelic_ratios_within_conditions): one row per allele,
+      columns 'allele', 'gene_id', 'ratios_rep_{condition}'. Brackets are drawn from allele 0
+      to each significantly differential allele using the per-allele FDR.
+    - Pairwise format (from test_allelic_ratios_pairwise): one row per allele pair,
+      columns 'allele_i', 'allele_j', 'gene_id_i', 'gene_id_j', 'ratios_rep_allele_{hap}'.
+      Brackets are drawn between each significantly different allele pair using the pair FDR.
+
+    Parameters
+    -----------
+    results_df : pd.DataFrame
+        Results dataframe from test_allelic_ratios_within_conditions or test_allelic_ratios_pairwise
+    n : int, optional
+        Number of top syntelogs to plot (default: 5)
+    figsize : tuple, optional
+        Figure size as (width, height) in inches (default: (16, 12))
+    palette : dict or None, optional
+        Color palette for conditions (default: None, uses seaborn defaults)
+    jitter : float, optional
+        Amount of jitter for strip plot (default: 0.2)
+    alpha : float, optional
+        Transparency of points (default: 0.7)
+    ylim : tuple, optional
+        Y-axis limits (default: None, auto-determined based on plot_type)
+    sort_by : str, optional
+        Column to sort results by ('p_value', 'FDR', or 'ratio_difference') (default: 'p_value')
+    output_file : str, optional
+        Path to save the figure (default: None, displays figure but doesn't save)
+    sig_threshold : float, optional
+        Significance threshold for FDR or p_value (default: 0.05)
+    ratio_difference_threshold : float, optional
+        Ratio difference threshold for significance (default: 0.1)
+    sig_color : str, optional
+        Color for titles of syntelogs with significant differences (default: 'red')
+    plot_type : str, optional
+        What to plot: 'ratios' for allelic ratios or 'cpm' for CPM values (default: 'ratios')
+    log2fc_threshold : float or None, optional
+        For pairwise between-conditions results: annotate brackets with the log2FC difference
+        when abs(log2FC_difference) exceeds this value (default: 1.0). Set to None to disable.
+
+    Returns
+    --------
+    fig : matplotlib.figure.Figure
+        The generated figure
+    """
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import pandas as pd
+    import numpy as np
+    import math
+
+    def _fdr_to_stars(fdr):
+        if fdr < 0.001:
+            return '***'
+        elif fdr < 0.01:
+            return '**'
+        elif fdr < 0.05:
+            return '*'
+        return None
+
+    def _draw_significance_bracket(ax, x1, x2, y, h, label, color='black', fontsize=8):
+        ax.plot([x1, x1, x2, x2], [y, y + h, y + h, y], lw=1.0, color=color)
+        ax.text((x1 + x2) / 2, y + h, label, ha='center', va='bottom', color=color, fontsize=fontsize)
+
+    if len(results_df) == 0:
+        print("No results to plot")
+        return None
+
+    # --- Detect input format ---
+    is_pairwise_between = 'haplotype_i' in results_df.columns and 'haplotype_j' in results_df.columns
+    is_pairwise_within = 'allele_i' in results_df.columns and 'allele_j' in results_df.columns
+    is_pairwise = is_pairwise_between or is_pairwise_within
+
+    if is_pairwise_between:
+        results_df, pairwise_sig = _normalize_pairwise_response_results(
+            results_df, sig_threshold, ratio_difference_threshold
+        )
+        # if plot_type == 'ratios':
+        #     #print("New pairwise response format detected: switching plot_type to 'cpm'.")
+        #     plot_type = 'cpm'
+    elif is_pairwise_within:
+        results_df, pairwise_sig = _normalize_pairwise_results(
+            results_df, sig_threshold, ratio_difference_threshold
+        )
+    else:
+        pairwise_sig = None  # significance is per-allele, handled below
+
+    if plot_type not in ['ratios', 'cpm']:
+        print(f"Invalid plot_type '{plot_type}'. Using 'ratios' instead.")
+        plot_type = 'ratios'
+
+    if sort_by not in ['p_value', 'FDR', 'ratio_difference']:
+        print(f"Invalid sort_by parameter '{sort_by}'. Using 'p_value' instead.")
+        sort_by = 'p_value'
+
+    if 'FDR' not in results_df.columns and sort_by == 'FDR':
+        print("FDR column not found. Using p_value for sorting.")
+        sort_by = 'p_value'
+
+    if 'ratio_difference' not in results_df.columns and sort_by == 'ratio_difference':
+        print("ratio_difference column not found. Using p_value for sorting.")
+        sort_by = 'p_value'
+
+    ascending_bool = False if sort_by == 'ratio_difference' else True
+
+    if plot_type == 'ratios':
+        value_prefix = 'ratios'
+        y_label = 'Expression Ratio'
+        default_ylim = (0, 1)
+    else:
+        value_prefix = 'cpm'
+        y_label = 'CPM'
+        default_ylim = None
+
+    if ylim is None:
+        ylim = default_ylim
+
+    condition_columns = [col for col in results_df.columns if col.startswith(f'{value_prefix}_rep_')]
+    if not condition_columns:
+        print(f"No {value_prefix} columns found in dataframe")
+        if plot_type == 'cpm':
+            print("Falling back to ratios...")
+            condition_columns = [col for col in results_df.columns if col.startswith('ratios_rep_')]
+            if condition_columns:
+                plot_type = 'ratios'
+                value_prefix = 'ratios'
+                y_label = 'Expression Ratio'
+                ylim = (0, 1) if ylim is None else ylim
+            else:
+                print("No ratio columns found either")
+                return None
+        else:
+            return None
+
+    conditions = [col.replace(f'{value_prefix}_rep_', '') for col in condition_columns]
+
+    top_syntelogs = results_df.sort_values(sort_by, ascending=ascending_bool).drop_duplicates('Synt_id').head(n)['Synt_id'].unique()
+    top_results = results_df[results_df['Synt_id'].isin(top_syntelogs)]
+
+    cols = 6
+    rows = math.ceil(len(top_syntelogs) / cols)
+
+    fig, axes = plt.subplots(rows, cols, figsize=figsize)
+
+    if rows == 1 and cols == 1:
+        axes = np.array([axes])
+    else:
+        axes = axes.flatten()
+
+    for i, synt_id in enumerate(top_syntelogs):
+        synt_data = top_results[top_results['Synt_id'] == synt_id].copy()
+        synt_data = synt_data.sort_values('allele')
+
+        p_value = synt_data['p_value'].min()
+        fdr = synt_data['FDR'].min() if 'FDR' in synt_data.columns else np.nan
+        ratio_difference = (synt_data.loc[synt_data['FDR'] < sig_threshold, 'ratio_difference'].max()
+                          if ('ratio_difference' in synt_data.columns and 'FDR' in synt_data.columns)
+                          else np.nan)
+
+        explode_cols = [col for col in synt_data.columns if col.startswith(f'{value_prefix}_rep_')]
+        exploded_rows = []
+
+        for idx, row in synt_data.iterrows():
+            base_row = {col: row[col] for col in synt_data.columns if col not in explode_cols}
+            max_length = 0
+            explode_data = {}
+            for col in explode_cols:
+                if isinstance(row[col], (list, np.ndarray)):
+                    explode_data[col] = row[col]
+                    max_length = max(max_length, len(row[col]))
+                else:
+                    explode_data[col] = [row[col]]
+                    max_length = max(max_length, 1)
+
+            for rep_idx in range(max_length):
+                new_row = base_row.copy()
+                for col in explode_cols:
+                    if rep_idx < len(explode_data[col]):
+                        new_row[col] = explode_data[col][rep_idx]
+                    else:
+                        new_row[col] = np.nan
+                exploded_rows.append(new_row)
+
+        synt_data_exploded = pd.DataFrame(exploded_rows)
+
+        id_vars = ['Synt_id', 'allele', 'gene_id']
+        if 'FDR' in synt_data.columns:
+            id_vars.append('FDR')
+        if 'functional_annotation' in synt_data.columns:
+            id_vars.append('functional_annotation')
+        synt_data_melted = pd.melt(
+            synt_data_exploded,
+            id_vars=id_vars,
+            value_vars=condition_columns,
+            var_name='condition',
+            value_name='value'
+        )
+
+        synt_data_melted['condition'] = synt_data_melted['condition'].str.replace(f'{value_prefix}_rep_', '')
+        synt_data_melted = synt_data_melted.dropna(subset=['value'])
+
+        ax = axes[i]
+        sns.stripplot(
+            x='allele',
+            y='value',
+            hue='condition',
+            data=synt_data_melted,
+            jitter=jitter,
+            alpha=alpha,
+            palette=palette,
+            ax=ax
+        )
+
+        allele_order = sorted(synt_data['allele'].unique())
+
+        # Build cond_colors using the same logic seaborn uses so mean lines match strip dots
+        if isinstance(palette, dict):
+            _pal_colors = sns.color_palette(None, len(conditions))
+            cond_colors = {cond: palette.get(cond, _pal_colors[j]) for j, cond in enumerate(conditions)}
+        else:
+            _pal_colors = sns.color_palette(palette, len(conditions))
+            cond_colors = dict(zip(conditions, _pal_colors))
+        for allele in allele_order:
+            allele_pos = allele_order.index(allele)
+            for cond in conditions:
+                mean_col = f'{value_prefix}_{cond}_mean'
+                allele_row = synt_data[synt_data['allele'] == allele]
+                if allele_row.empty or mean_col not in allele_row.columns:
+                    continue
+                mean_val = allele_row[mean_col].iloc[0]
+                if pd.isna(mean_val):
+                    continue
+                ax.hlines(y=mean_val, xmin=allele_pos - 0.2, xmax=allele_pos + 0.2,
+                          colors=cond_colors[cond], linewidth=2)
+
+        # --- Significance brackets ---
+        current_ylim = ax.get_ylim()
+        y_max = current_ylim[1] if ylim is None else ylim[1]
+        y_range = y_max - (current_ylim[0] if ylim is None else ylim[0])
+        bracket_step = y_range * 0.08
+        bracket_height = y_range * 0.03
+
+        sig_brackets = []
+
+        if is_pairwise:
+            # Use pair-wise FDR: one bracket per significant allele pair
+            synt_pairs = pairwise_sig[pairwise_sig['Synt_id'] == synt_id]
+            for _, pair_row in synt_pairs.iterrows():
+                a_i = str(pair_row['allele_i'])
+                a_j = str(pair_row['allele_j'])
+                if a_i in allele_order and a_j in allele_order:
+                    stars = _fdr_to_stars(pair_row['FDR'])
+                    if stars:
+                        label = stars
+                        # if (log2fc_threshold is not None
+                        #         and 'log2FC_difference' in pair_row.index
+                        #         and not np.isnan(pair_row['log2FC_difference'])
+                        #         and abs(pair_row['log2FC_difference']) > log2fc_threshold):
+                        #     label = f"{stars}\nΔlFC={pair_row['log2FC_difference']:.1f}"
+                        sig_brackets.append((allele_order.index(a_i), allele_order.index(a_j), label))
+        else:
+            # Per-allele FDR: bracket from allele 0 to each significant allele
+            use_fdr = 'FDR' in synt_data.columns
+            for allele in allele_order[1:]:
+                allele_row = synt_data[synt_data['allele'] == allele]
+                if allele_row.empty:
+                    continue
+                score = allele_row['FDR'].iloc[0] if use_fdr else allele_row['p_value'].iloc[0]
+                rd = allele_row['ratio_difference'].iloc[0] if 'ratio_difference' in allele_row.columns else np.nan
+                if (score <= sig_threshold) and (not np.isnan(rd) and rd > ratio_difference_threshold):
+                    stars = _fdr_to_stars(score)
+                    if stars:
+                        sig_brackets.append((0, allele_order.index(allele), stars))
+
+        for bracket_idx, (pos1, pos2, stars) in enumerate(sig_brackets):
+            y_bracket = y_max + bracket_step * (bracket_idx + 0.5)
+            _draw_significance_bracket(ax, pos1, pos2, y_bracket, bracket_height, stars, fontsize=7)
+
+        if sig_brackets:
+            new_ymax = y_max + bracket_step * (len(sig_brackets) + 1)
+            ax.set_ylim((ylim[0] if ylim is not None else current_ylim[0]), new_ymax)
+        elif ylim is not None:
+            ax.set_ylim(ylim)
+
+        # Title
+        fdr_text = f"FDR={fdr:.2e}" if not np.isnan(fdr) else ""
+        if 'FDR' in synt_data.columns and not np.isnan(fdr):
+            is_significant = (fdr <= sig_threshold) and (np.isnan(ratio_difference) or ratio_difference > ratio_difference_threshold)
+        else:
+            is_significant = p_value <= sig_threshold
+        title_color = sig_color if is_significant else 'black'
+
+        function_annotation_text = "NA"
+        if 'functional_annotation' in synt_data_melted.columns:
+            function_annotation = synt_data_melted['functional_annotation'].iloc[0]
+            if function_annotation is not None:
+                function_annotation = function_annotation.split('/')
+                function_annotation = list(dict.fromkeys(function_annotation))
+                function_annotation = ' '.join(function_annotation)
+                words = function_annotation.split(' ')
+                function_annotation_text = ' '.join(words[:4])
+                if len(words) > 4:
+                    function_annotation_text = f"{function_annotation_text}\n{' '.join(words[4:8])}"
+
+        gene_id = synt_data_melted['gene_id'].iloc[0]
+        ax.set_title(f"{gene_id}\n{function_annotation_text}\n{fdr_text}", color=title_color)
+        ax.set_xlabel('Allele')
+        ax.set_ylabel(y_label)
+
+        if ax.get_legend():
+            ax.legend(title='Condition', loc='best')
+
+    for j in range(len(top_syntelogs), rows * cols):
+        axes[j].set_visible(False)
+
+    plt.tight_layout()
+
+    if output_file:
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+
+    return fig
+
+
+def _normalize_pairwise_response_results(pairwise_df, sig_threshold, ratio_difference_threshold):
+    """
+    Convert test_pairwise_allele_response_between_conditions output into the per-allele format
+    expected by plot_top_differential_syntelogs_annotated.
+
+    Returns
+    --------
+    per_allele_df : pd.DataFrame
+        One row per (Synt_id, allele) with cpm_rep_{condition} and cpm_{condition}_mean columns.
+    sig_pairs_df : pd.DataFrame
+        Significant pairs with allele_i, allele_j, FDR columns for bracket drawing.
+    """
+    import pandas as pd
+    import numpy as np
+
+    cpm_conditions = [c.replace('cpm_rep_i_', '') for c in pairwise_df.columns if c.startswith('cpm_rep_i_')]
+    ratio_conditions = [c.replace('ratios_rep_i_', '') for c in pairwise_df.columns if c.startswith('ratios_rep_i_')]
+
+    seen = {}
+
+    for _, row in pairwise_df.iterrows():
+        synt_id = row['Synt_id']
+        for side in ('i', 'j'):
+            allele = str(row[f'haplotype_{side}'])
+            key = (synt_id, allele)
+            if key in seen:
+                continue
+
+            allele_mask = (
+                (pairwise_df['Synt_id'] == synt_id) &
+                ((pairwise_df['haplotype_i'].astype(str) == allele) |
+                 (pairwise_df['haplotype_j'].astype(str) == allele))
+            )
+            allele_pairs = pairwise_df[allele_mask]
+            min_fdr = allele_pairs['FDR'].min() if 'FDR' in allele_pairs.columns else np.nan
+            min_p = allele_pairs['p_value'].min() if 'p_value' in allele_pairs.columns else np.nan
+            max_rd = allele_pairs['ratio_difference'].max() if 'ratio_difference' in allele_pairs.columns else np.nan
+
+            record = {
+                'Synt_id': synt_id,
+                'allele': allele,
+                'gene_id': row[f'gene_id_{side}'],
+                'p_value': min_p,
+                'FDR': min_fdr,
+                'ratio_difference': max_rd,
+            }
+
+            if f'functional_annotation_{side}' in row.index:
+                record['functional_annotation'] = row[f'functional_annotation_{side}']
+
+            for cond in cpm_conditions:
+                record[f'cpm_rep_{cond}'] = row.get(f'cpm_rep_{side}_{cond}', np.nan)
+                record[f'cpm_{cond}_mean'] = row.get(f'cpm_{side}_{cond}_mean', np.nan)
+
+            for cond in ratio_conditions:
+                record[f'ratios_rep_{cond}'] = row.get(f'ratios_rep_{side}_{cond}', np.nan)
+                record[f'ratios_{cond}_mean'] = row.get(f'ratios_{side}_{cond}_mean', np.nan)
+
+            seen[key] = record
+
+    per_allele_df = pd.DataFrame(list(seen.values()))
+
+    sig_mask = pairwise_df['FDR'] < sig_threshold
+    if 'ratio_difference' in pairwise_df.columns:
+        sig_mask = sig_mask & (pairwise_df['ratio_difference'] > ratio_difference_threshold)
+    keep_cols = ['Synt_id', 'haplotype_i', 'haplotype_j', 'FDR']
+    if 'log2FC_difference' in pairwise_df.columns:
+        keep_cols.append('log2FC_difference')
+    sig_pairs_df = pairwise_df[sig_mask][keep_cols].rename(
+        columns={'haplotype_i': 'allele_i', 'haplotype_j': 'allele_j'}
+    ).copy()
+    sig_pairs_df['allele_i'] = sig_pairs_df['allele_i'].astype(str)
+    sig_pairs_df['allele_j'] = sig_pairs_df['allele_j'].astype(str)
+
+    return per_allele_df, sig_pairs_df
+
+
+def _normalize_pairwise_results(pairwise_df, sig_threshold, ratio_difference_threshold):
+    """
+    Convert test_allelic_ratios_pairwise output into the per-allele format expected by
+    plot_top_differential_syntelogs_annotated, and extract significant pairs for bracket annotation.
+
+    The pairwise format has one row per allele pair. This creates one row per (Synt_id, allele),
+    storing the replicate ratio values in a single column 'ratios_rep_ratio' so the standard
+    column-detection logic in the plotting function finds exactly one condition column.
+
+    Returns
+    --------
+    per_allele_df : pd.DataFrame
+        One row per (Synt_id, allele) with columns allele, gene_id, ratios_rep_ratio, FDR, etc.
+    sig_pairs_df : pd.DataFrame
+        Rows from pairwise_df passing both thresholds, with Synt_id, allele_i, allele_j, FDR.
+    """
+    import pandas as pd
+    import numpy as np
+
+    seen = {}  # (Synt_id, allele) -> record dict
+
+    for _, row in pairwise_df.iterrows():
+        synt_id = row['Synt_id']
+        for side in ('i', 'j'):
+            allele = str(row[f'allele_{side}'])
+            key = (synt_id, allele)
+            if key in seen:
+                continue
+
+            rep_col = f'ratios_rep_allele_{allele}'
+            rep_values = row[rep_col] if rep_col in row.index else np.nan
+
+            mean_col = f'ratio_allele_{allele}_mean'
+            mean_val = row[mean_col] if mean_col in row.index else np.nan
+
+            # Aggregate stats across all pairs that involve this allele
+            allele_mask = (
+                (pairwise_df['Synt_id'] == synt_id) &
+                ((pairwise_df['allele_i'].astype(str) == allele) |
+                 (pairwise_df['allele_j'].astype(str) == allele))
+            )
+            allele_pairs = pairwise_df[allele_mask]
+            min_fdr = allele_pairs['FDR'].min() if 'FDR' in allele_pairs.columns else np.nan
+            min_p = allele_pairs['p_value'].min() if 'p_value' in allele_pairs.columns else np.nan
+            max_rd = allele_pairs['ratio_difference'].max() if 'ratio_difference' in allele_pairs.columns else np.nan
+
+            seen[key] = {
+                'Synt_id': synt_id,
+                'allele': allele,
+                'gene_id': row[f'gene_id_{side}'],
+                'functional_annotation': row.get('functional_annotation', None),
+                'p_value': min_p,
+                'FDR': min_fdr,
+                'ratio_difference': max_rd,
+                'ratios_rep_ratio': rep_values,   # single unified rep column
+                'ratios_ratio_mean': mean_val,
+            }
+
+    per_allele_df = pd.DataFrame(list(seen.values()))
+
+    # Significant pairs for bracket drawing
+    sig_mask = pairwise_df['FDR'] < sig_threshold
+    if 'ratio_difference' in pairwise_df.columns:
+        sig_mask = sig_mask & (pairwise_df['ratio_difference'] > ratio_difference_threshold)
+    sig_pairs_df = pairwise_df[sig_mask][['Synt_id', 'allele_i', 'allele_j', 'FDR']].copy()
+    sig_pairs_df['allele_i'] = sig_pairs_df['allele_i'].astype(str)
+    sig_pairs_df['allele_j'] = sig_pairs_df['allele_j'].astype(str)
+
+    return per_allele_df, sig_pairs_df
+
+
 def plot_top_differential_isoforms(results_df, n=5, figsize=(16, 12), palette=None, jitter=0.2, alpha=0.7, ylim=(0, 1), sort_by='p_value', output_file=None, sig_threshold=0.05, ratio_difference_threshold=0.2, sig_color='red'):
     """
     Plot the top n genes with differential isoform usage in a grid layout (3 plots per row).

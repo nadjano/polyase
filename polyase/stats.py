@@ -213,7 +213,7 @@ def test_allelic_ratios_within_conditions(adata, layer="unique_counts", test_con
                 'p_value': p_value,
                 'ratio_difference': ratio_difference,
                 'n_alleles': len(allele_indices),
-                f'ratios_{test_condition}_mean': ratio_stats[0],
+                f'ratios_{test_condition}_mean': np.mean(allelic_ratios[total_counts > 0]),
                 f'ratios_rep_{test_condition}': allelic_ratios
             }
 
@@ -268,6 +268,225 @@ def test_allelic_ratios_within_conditions(adata, layer="unique_counts", test_con
         print(f"Found {len(results_df_sig_grouped)} from {len(grouped_results)} syntelogs with at least one significantly different allele (FDR < {FDR_cutoff} and ratio difference > {ratio_diff_cutoff})")
 
     # Return AnnData object if not inplace
+    if not inplace:
+        return adata
+    else:
+        return results_df
+
+
+def test_allelic_ratios_pairwise(adata, layer="unique_counts", test_condition="control", inplace=True, FDR_cutoff=0.05, ratio_diff_cutoff=0.1):
+    """
+    Test all pairwise combinations of alleles within a syntelog for differential expression.
+
+    For each syntelog, every pair of alleles is tested against each other using a
+    beta-binomial likelihood ratio test. This is in contrast to
+    test_allelic_ratios_within_conditions, which tests each allele against a balanced
+    (equal) expectation.
+
+    Parameters
+    -----------
+    adata : AnnData
+        AnnData object containing expression data
+    layer : str, optional
+        Layer containing count data (default: "unique_counts")
+    test_condition : str, optional
+        Condition to subset samples for testing, or "all" to use all samples (default: "control")
+    inplace : bool, optional
+        Whether to modify the input AnnData object or return a copy (default: True)
+    FDR_cutoff : float, optional
+        False discovery rate cutoff for significance (default: 0.05)
+    ratio_diff_cutoff : float, optional
+        Minimum ratio difference for significance (default: 0.1)
+
+    Returns
+    --------
+    AnnData or pd.DataFrame
+        If inplace=False, returns modified copy of AnnData; otherwise returns results DataFrame.
+        Results are stored in:
+        - adata.uns['allelic_ratio_pairwise_test']: Complete pairwise test results as DataFrame
+        - adata.var['allelic_ratio_pairwise_min_pval']: Minimum p-value across all pairs per allele
+        - adata.var['allelic_ratio_pairwise_min_FDR']: Corresponding FDR-corrected value
+    """
+    import pandas as pd
+    import numpy as np
+    import re
+    from itertools import combinations
+    from statsmodels.stats.multitest import multipletests
+    from isotools._transcriptome_stats import betabinom_lr_test
+    from anndata import AnnData
+
+    if not isinstance(adata, AnnData):
+        raise ValueError("Input adata must be an AnnData object")
+
+    if layer not in adata.layers:
+        raise ValueError(f"Layer '{layer}' not found in AnnData object")
+
+    if not inplace:
+        adata = adata.copy()
+
+    counts = adata.layers[layer].copy()
+
+    if layer == "unique_counts":
+        allelic_ratio_counts = adata.layers["allelic_ratio_unique_counts"].copy()
+    elif layer == "em_counts":
+        allelic_ratio_counts = adata.layers["allelic_ratio_em_counts"].copy()
+    else:
+        raise ValueError("Layer must be either 'unique_counts' or 'em_counts'")
+
+    cpm_layer_name = layer.replace('counts', 'cpm')
+    cpm_counts = None
+    if cpm_layer_name in adata.layers:
+        cpm_counts = adata.layers[cpm_layer_name].copy()
+        print(f"Using CPM data from layer: {cpm_layer_name}")
+    else:
+        print(f"CPM layer '{cpm_layer_name}' not found, CPM values will not be included")
+
+    if "Synt_id" not in adata.var:
+        raise ValueError("'Synt_id' not found in adata.var")
+    synt_ids = adata.var["Synt_id"]
+
+    if "functional_annotation" in adata.var:
+        functional_annotations = adata.var["functional_annotation"]
+    else:
+        functional_annotations = "Missing annotation"
+        print("No functional annotations found in adata.var, skipping functional annotation processing.")
+
+    if not adata.var_names.any():
+        raise ValueError("'transcript_id' not found in adata.var_names")
+    gene_ids = adata.var_names
+    transcript_ids = adata.var['transcript_id']
+
+    if test_condition != "all" and test_condition not in adata.obs['condition'].unique():
+        raise ValueError(f"Condition '{test_condition}' not found in adata.obs['condition']")
+
+    if test_condition == "all":
+        condition_indices = np.arange(counts.shape[0])
+    else:
+        condition_indices = np.where(adata.obs['condition'] == test_condition)[0]
+
+    unique_synt_ids = np.unique(synt_ids)
+    results = []
+
+    # Per-allele arrays to track the minimum p-value across all pairs
+    min_pvals = np.full(adata.n_vars, np.nan)
+    min_fdr_pvals = np.full(adata.n_vars, np.nan)
+
+    total_syntelogs = len(unique_synt_ids)
+    processed = 0
+
+    for synt_id in unique_synt_ids:
+        processed += 1
+        if processed % 100 == 0:
+            print(f"Processing syntelog {processed}/{total_syntelogs}")
+
+        allele_indices = np.where(synt_ids == synt_id)[0]
+
+        if len(allele_indices) < 2:
+            continue
+
+        # Subset counts to condition samples and alleles in this syntelog
+        condition_counts = counts[np.ix_(condition_indices, allele_indices)]
+        condition_ratios = allelic_ratio_counts[np.ix_(condition_indices, allele_indices)]
+        condition_cpm = cpm_counts[np.ix_(condition_indices, allele_indices)] if cpm_counts is not None else None
+
+        # Total counts per sample across all alleles in this syntelog
+        total_counts = np.round(np.sum(condition_counts, axis=1))
+
+        def get_haplotype_num(allele_pos_local):
+            haplotype = adata.var['haplotype'].iloc[allele_indices[allele_pos_local]]
+            match = re.search(r'hap(\d+)', haplotype)
+            return match.group(1) if match else str(allele_pos_local + 1)
+
+        # Test all pairwise combinations of alleles
+        for i, j in combinations(range(len(allele_indices)), 2):
+            allele_pos_i = allele_indices[i]
+            allele_pos_j = allele_indices[j]
+
+            counts_i = np.round(condition_counts[:, i])
+            counts_j = np.round(condition_counts[:, j])
+            pair_total = np.round(counts_i + counts_j)
+
+            try:
+                test_result = betabinom_lr_test([counts_i, counts_j], [pair_total, pair_total])
+                p_value, ratio_stats = test_result[0], test_result[1]
+                ratio_difference = abs(ratio_stats[0] - ratio_stats[2])
+            except Exception as e:
+                print(f"Error testing syntelog {synt_id}, alleles {i} vs {j}: {str(e)}")
+                continue
+
+            hap_i = get_haplotype_num(i)
+            hap_j = get_haplotype_num(j)
+
+            # Ensure allele_i always has the lower allele number
+            try:
+                if int(hap_i) > int(hap_j):
+                    hap_i, hap_j = hap_j, hap_i
+                    i, j = j, i
+                    allele_pos_i, allele_pos_j = allele_pos_j, allele_pos_i
+            except ValueError:
+                if hap_i > hap_j:
+                    hap_i, hap_j = hap_j, hap_i
+                    i, j = j, i
+                    allele_pos_i, allele_pos_j = allele_pos_j, allele_pos_i
+
+            gene_id_i = gene_ids[allele_pos_i]
+            gene_id_j = gene_ids[allele_pos_j]
+            functional_annotation_i = functional_annotations.iloc[allele_pos_i]
+
+            result_dict = {
+                'Synt_id': synt_id,
+                'allele_i': hap_i,
+                'allele_j': hap_j,
+                'gene_id_i': gene_id_i,
+                'gene_id_j': gene_id_j,
+                'functional_annotation': functional_annotation_i,
+                'p_value': p_value,
+                'ratio_difference': ratio_difference,
+                'n_alleles': len(allele_indices),
+                f'ratio_allele_{hap_i}_mean': np.mean(condition_ratios[:, i][total_counts > 0]),
+                f'ratio_allele_{hap_j}_mean': np.mean(condition_ratios[:, j][total_counts > 0]),
+                f'ratios_rep_allele_{hap_i}': condition_ratios[:, i],
+                f'ratios_rep_allele_{hap_j}': condition_ratios[:, j],
+            }
+
+            if condition_cpm is not None:
+                result_dict[f'cpm_allele_{hap_i}_mean'] = np.mean(condition_cpm[:, i])
+                result_dict[f'cpm_allele_{hap_j}_mean'] = np.mean(condition_cpm[:, j])
+
+            results.append(result_dict)
+
+            # Track minimum p-value per allele across all its pairs
+            for allele_pos in [allele_pos_i, allele_pos_j]:
+                if np.isnan(min_pvals[allele_pos]) or p_value < min_pvals[allele_pos]:
+                    min_pvals[allele_pos] = p_value
+
+    results_df = pd.DataFrame(results)
+
+    if len(results_df) > 0:
+        results_df['p_value'] = results_df['p_value'].fillna(1)
+        results_df['FDR'] = multipletests(results_df['p_value'], method='fdr_bh')[1]
+        results_df = results_df.sort_values('p_value')
+
+        # Map minimum FDR back per allele
+        fdr_map = {}
+        for _, row in results_df.iterrows():
+            for gid in [row['gene_id_i'], row['gene_id_j']]:
+                if gid not in fdr_map or row['FDR'] < fdr_map[gid]:
+                    fdr_map[gid] = row['FDR']
+
+        for i, gene_id in enumerate(gene_ids):
+            if gene_id in fdr_map:
+                min_fdr_pvals[i] = fdr_map[gene_id]
+
+        results_df_sig = results_df[(results_df['FDR'] < FDR_cutoff) & (results_df['ratio_difference'] > ratio_diff_cutoff)]
+        sig_syntelogs = results_df_sig['Synt_id'].nunique()
+        total_syntelogs_tested = results_df['Synt_id'].nunique()
+        print(f"Found {sig_syntelogs} from {total_syntelogs_tested} syntelogs with at least one significantly different allele pair (FDR < {FDR_cutoff} and ratio difference > {ratio_diff_cutoff})")
+
+    adata.uns['allelic_ratio_pairwise_test'] = results_df
+    adata.var['allelic_ratio_pairwise_min_pval'] = min_pvals
+    adata.var['allelic_ratio_pairwise_min_FDR'] = min_fdr_pvals
+
     if not inplace:
         return adata
     else:
@@ -485,9 +704,9 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
                 'p_value': p_value,
                 'ratio_difference': ratio_difference,
                 'n_alleles': len(allele_indices),
-                f'ratios_{unique_conditions[0]}_mean': ratio_stats[0],
+                f'ratios_{unique_conditions[0]}_mean': np.mean(allelic_ratios[unique_conditions[0]][condition_total[0] > 0]),
                 f'ratios_rep_{unique_conditions[0]}': allelic_ratios[unique_conditions[0]],
-                f'ratios_{unique_conditions[1]}_mean': ratio_stats[2],
+                f'ratios_{unique_conditions[1]}_mean': np.mean(allelic_ratios[unique_conditions[1]][condition_total[1] > 0]),
                 f'ratios_rep_{unique_conditions[1]}': allelic_ratios[unique_conditions[1]]
             }
 
@@ -547,6 +766,229 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
         return adata
     else:
         return results_df
+
+def test_pairwise_allele_response_between_conditions(adata, layer="unique_counts", group_key="condition", inplace=True, FDR_cutoff=0.05, ratio_diff_cutoff=0.1):
+    """
+    Test if pairs of alleles within a syntelog respond differently between conditions.
+
+    For each pair of alleles (i, j) within a syntelog, tests whether the ratio
+    count_i / (count_i + count_j) changes between conditions using a beta-binomial
+    likelihood ratio test. A significant result means the two alleles have divergent
+    fold-changes between conditions (e.g., allele1 up-regulated, allele2 down-regulated).
+
+    Parameters
+    -----------
+    adata : AnnData
+        AnnData object containing expression data
+    layer : str, optional
+        Layer containing count data (default: "unique_counts")
+    group_key : str, optional
+        Variable column name containing condition information (default: "condition")
+    inplace : bool, optional
+        Whether to modify the input AnnData object or return a copy (default: True)
+    FDR_cutoff : float, optional
+        False discovery rate cutoff for significance (default: 0.05)
+    ratio_diff_cutoff : float, optional
+        Minimum ratio difference for significance (default: 0.1)
+
+    Returns
+    --------
+    AnnData or None
+        If inplace=False, returns modified copy of AnnData; otherwise returns None
+        Results are stored in:
+        - adata.uns['pairwise_allele_response_test']: Complete test results as DataFrame
+        - adata.var['pairwise_response_min_pval']: Min p-value across all pairs per allele
+        - adata.var['pairwise_response_min_fdr']: Min FDR across all pairs per allele
+    pd.DataFrame
+        Results of pairwise statistical tests
+    """
+    import pandas as pd
+    import numpy as np
+    import re
+    from collections import defaultdict
+    from itertools import combinations
+    from statsmodels.stats.multitest import multipletests
+    from isotools._transcriptome_stats import betabinom_lr_test
+    from anndata import AnnData
+
+    if not isinstance(adata, AnnData):
+        raise ValueError("Input adata must be an AnnData object")
+    if layer not in adata.layers:
+        raise ValueError(f"Layer '{layer}' not found in AnnData object")
+    if group_key not in adata.obs:
+        raise ValueError(f"Group key '{group_key}' not found in adata.obs")
+    if "Synt_id" not in adata.var:
+        raise ValueError("'Synt_id' not found in adata.var")
+    if "transcript_id" not in adata.var:
+        raise ValueError("'transcript_id' not found in adata.var")
+    if "haplotype" not in adata.var:
+        raise ValueError("'haplotype' not found in adata.var")
+
+    if not inplace:
+        adata = adata.copy()
+
+    counts = adata.layers[layer].copy()
+
+    allelic_ratio_layer_name = 'allelic_ratio_' + layer  # e.g. unique_counts -> allelic_ratio_unique_counts
+    allelic_ratio_counts = None
+    if allelic_ratio_layer_name in adata.layers:
+        allelic_ratio_counts = adata.layers[allelic_ratio_layer_name].copy()
+    else:
+        print(f"Allelic ratio layer '{allelic_ratio_layer_name}' not found, ratio replicates will not be included")
+
+    cpm_layer_name = layer.replace('counts', 'cpm')
+    cpm_counts = None
+    if cpm_layer_name in adata.layers:
+        cpm_counts = adata.layers[cpm_layer_name].copy()
+        print(f"Using CPM data from layer: {cpm_layer_name}")
+    else:
+        print(f"CPM layer '{cpm_layer_name}' not found, log2FC values will not be included")
+
+    synt_ids = adata.var["Synt_id"]
+    gene_ids = adata.var_names
+    transcript_ids = adata.var['transcript_id']
+    haplotypes = adata.var['haplotype']
+    functional_annotations = adata.var.get("functional_annotation", None)
+
+    conditions = adata.obs[group_key].values
+    unique_conditions = np.unique(conditions)
+    if len(unique_conditions) != 2:
+        raise ValueError(f"Need exactly 2 conditions, found {len(unique_conditions)}: {unique_conditions}")
+
+    cond0, cond1 = unique_conditions
+    cond0_idx = np.where(conditions == cond0)[0]
+    cond1_idx = np.where(conditions == cond1)[0]
+
+    unique_synt_ids = np.unique(synt_ids)
+    results = []
+    min_pvals = np.full(adata.n_vars, np.nan)
+
+    def _parse_hap(hap_str, fallback):
+        try:
+            m = re.search(r'hap(\d+)', hap_str)
+            return m.group(1) if m else fallback
+        except Exception:
+            return fallback
+
+    total_syntelogs = len(unique_synt_ids)
+    processed = 0
+
+    for synt_id in unique_synt_ids:
+        processed += 1
+        if processed % 100 == 0:
+            print(f"Processing syntelog {processed}/{total_syntelogs}")
+
+        allele_indices = np.where(synt_ids == synt_id)[0]
+        if len(allele_indices) < 2:
+            continue
+
+        for idx_i, idx_j in combinations(range(len(allele_indices)), 2):
+            pos_i = allele_indices[idx_i]
+            pos_j = allele_indices[idx_j]
+
+            # Build per-condition count arrays for allele i and total (i+j)
+            allele_counts_i = []
+            totals_ij = []
+            for cond_indices in (cond0_idx, cond1_idx):
+                ci = np.asarray(counts[np.ix_(cond_indices, [pos_i])]).flatten()
+                cj = np.asarray(counts[np.ix_(cond_indices, [pos_j])]).flatten()
+                allele_counts_i.append(np.round(ci))
+                totals_ij.append(np.round(ci + cj))
+
+            # Skip if either condition has no counts for this pair
+            if any(np.all(t == 0) for t in totals_ij):
+                continue
+
+            try:
+                test_result = betabinom_lr_test(allele_counts_i, totals_ij)
+                p_value, ratio_stats = test_result[0], test_result[1]
+                if len(ratio_stats) < 3:
+                    continue
+                ratio_difference = abs(ratio_stats[0] - ratio_stats[2])
+            except Exception as e:
+                print(f"Error testing syntelog {synt_id}, pair ({idx_i}, {idx_j}): {str(e)}")
+                continue
+
+            result_dict = {
+                'Synt_id': synt_id,
+                'gene_id_i': gene_ids[pos_i],
+                'gene_id_j': gene_ids[pos_j],
+                'transcript_id_i': transcript_ids.iloc[pos_i],
+                'transcript_id_j': transcript_ids.iloc[pos_j],
+                'haplotype_i': _parse_hap(haplotypes.iloc[pos_i], str(idx_i + 1)),
+                'haplotype_j': _parse_hap(haplotypes.iloc[pos_j], str(idx_j + 1)),
+                'p_value': p_value,
+                'ratio_difference': ratio_difference,
+                f'ratio_{cond0}': ratio_stats[0],
+                f'ratio_{cond1}': ratio_stats[2],
+            }
+
+            if functional_annotations is not None:
+                result_dict['functional_annotation_i'] = functional_annotations.iloc[pos_i]
+                result_dict['functional_annotation_j'] = functional_annotations.iloc[pos_j]
+
+            # Per-replicate allelic ratios for each allele in each condition
+            if allelic_ratio_counts is not None:
+                for pos, label in ((pos_i, 'i'), (pos_j, 'j')):
+                    r0 = np.asarray(allelic_ratio_counts[np.ix_(cond0_idx, [pos])]).flatten()
+                    r1 = np.asarray(allelic_ratio_counts[np.ix_(cond1_idx, [pos])]).flatten()
+                    result_dict[f'ratios_rep_{label}_{cond0}'] = r0
+                    result_dict[f'ratios_rep_{label}_{cond1}'] = r1
+                    result_dict[f'ratios_{label}_{cond0}_mean'] = np.mean(r0)
+                    result_dict[f'ratios_{label}_{cond1}_mean'] = np.mean(r1)
+
+            # log2FC per allele from CPM; store per-replicate arrays for plotting
+            if cpm_counts is not None:
+                pseudocount = 1e-3
+                for pos, label in ((pos_i, 'i'), (pos_j, 'j')):
+                    vals0 = np.asarray(cpm_counts[np.ix_(cond0_idx, [pos])]).flatten()
+                    vals1 = np.asarray(cpm_counts[np.ix_(cond1_idx, [pos])]).flatten()
+                    result_dict[f'cpm_{label}_{cond0}_mean'] = np.mean(vals0)
+                    result_dict[f'cpm_{label}_{cond1}_mean'] = np.mean(vals1)
+                    result_dict[f'cpm_rep_{label}_{cond0}'] = vals0
+                    result_dict[f'cpm_rep_{label}_{cond1}'] = vals1
+                    result_dict[f'log2FC_{label}'] = np.log2((np.mean(vals1) + pseudocount) / (np.mean(vals0) + pseudocount))
+                result_dict['log2FC_difference'] = result_dict['log2FC_i'] - result_dict['log2FC_j']
+
+            results.append(result_dict)
+
+            # Track minimum p-value per allele position
+            for pos in (pos_i, pos_j):
+                if np.isnan(min_pvals[pos]) or p_value < min_pvals[pos]:
+                    min_pvals[pos] = p_value
+
+    results_df = pd.DataFrame(results)
+    min_fdr = np.full(adata.n_vars, np.nan)
+
+    if len(results_df) > 0:
+        results_df['p_value'] = results_df['p_value'].fillna(1)
+        results_df['FDR'] = multipletests(results_df['p_value'], method='fdr_bh')[1]
+        results_df = results_df.sort_values('p_value')
+
+        # Map minimum FDR back to each allele position
+        gene_min_fdr = defaultdict(lambda: np.nan)
+        for _, row in results_df.iterrows():
+            for col in ('gene_id_i', 'gene_id_j'):
+                gid = row[col]
+                if np.isnan(gene_min_fdr[gid]) or row['FDR'] < gene_min_fdr[gid]:
+                    gene_min_fdr[gid] = row['FDR']
+        for i, gid in enumerate(gene_ids):
+            if gid in gene_min_fdr:
+                min_fdr[i] = gene_min_fdr[gid]
+
+    adata.uns['pairwise_allele_response_test'] = results_df
+    adata.var['pairwise_response_min_pval'] = min_pvals
+    adata.var['pairwise_response_min_fdr'] = min_fdr
+
+    if len(results_df) > 0:
+        sig = results_df[(results_df['FDR'] < FDR_cutoff) & (results_df['ratio_difference'] > ratio_diff_cutoff)]
+        print(f"Found {sig['Synt_id'].nunique()} from {results_df['Synt_id'].nunique()} syntelogs with at least one allele pair showing divergent response (FDR < {FDR_cutoff} and ratio difference > {ratio_diff_cutoff})")
+
+    if not inplace:
+        return adata
+    else:
+        return results_df
+
 
 def get_top_differential_syntelogs(results_df, n=5, sort_by='p_value', fdr_threshold=0.05, ratio_threshold=0.1):
     """
@@ -836,9 +1278,9 @@ def test_isoform_DIU_between_conditions(adata, layer="unique_counts", group_key=
                 'p_value': p_value,
                 'ratio_difference': ratio_difference,
                 'n_isoforms': len(isoform_indices),
-                f'ratios_{unique_conditions[0]}_mean': ratio_stats[0],
+                f'ratios_{unique_conditions[0]}_mean': np.mean(isoform_ratios_per_condition[unique_conditions[0]][gene_total_counts[0] > 0]),
                 f'ratios_rep_{unique_conditions[0]}': isoform_ratios_per_condition[unique_conditions[0]],
-                f'ratios_{unique_conditions[1]}_mean': ratio_stats[2],
+                f'ratios_{unique_conditions[1]}_mean': np.mean(isoform_ratios_per_condition[unique_conditions[1]][gene_total_counts[1] > 0]),
                 f'ratios_rep_{unique_conditions[1]}': isoform_ratios_per_condition[unique_conditions[1]]
             })
 

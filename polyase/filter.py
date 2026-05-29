@@ -139,9 +139,13 @@ def filter_low_expressed_genes(
     # Check parameters
     if mode not in ['any', 'all', 'mean']:
         raise ValueError("mode must be one of 'any', 'all', or 'mean'")
+    
+    if library_size_dependent == False:
+        lib_size_normalization = None  # Ensure it's a boolean
 
     if lib_size_normalization not in ['cpm', None]:
         raise ValueError(f"Unsupported normalization method: {lib_size_normalization}, use 'cpm' or None")
+
 
     # Get group mapping
     group_mapping = _get_group_mapping(adata, group_col, group_source)

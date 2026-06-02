@@ -56,12 +56,10 @@ def test_allelic_ratios_within_conditions(adata, layer="unique_counts", test_con
     counts = adata.layers[layer].copy()  # Create a copy to avoid modifying original
 
     # Get allelic ratio counts
-    if layer == "unique_counts":
-        allelic_ratio_counts = adata.layers["allelic_ratio_unique_counts"].copy()
-    elif layer == "em_counts":
-        allelic_ratio_counts = adata.layers["allelic_ratio_em_counts"].copy()
-    else:
-        raise ValueError("Layer must be either 'allelic_ratio_unique_counts' or 'allelic_ratio_em_counts'")
+    allelic_ratio_layer_name = 'allelic_ratio_' + layer
+    if allelic_ratio_layer_name not in adata.layers:
+        raise ValueError(f"Layer '{allelic_ratio_layer_name}' not found in AnnData object")
+    allelic_ratio_counts = adata.layers[allelic_ratio_layer_name].copy()
 
     # Get CPM data if available
     cpm_layer_name = layer.replace('counts', 'cpm')  # e.g., unique_counts -> unique_cpm
@@ -185,18 +183,7 @@ def test_allelic_ratios_within_conditions(adata, layer="unique_counts", test_con
             functional_annotation = functional_annotations.iloc[allele_pos]
 
             haplotype = adata.var['haplotype'].iloc[allele_indices[allele_idx]]
-            # Extract allele number from haplotype
-
-            try:
-                allele_match = re.search(r'hap(\d+)', haplotype)  # Capture the number
-                if allele_match:
-                    allele_num = allele_match.group(1)  # Get the captured number directly
-                else:
-                    allele_num = f"{allele_idx+1}"  # Fallback if regex fails
-                    print(f"No match found, using fallback: {allele_num}")
-            except Exception as e:
-                print(f"Error: {e}")
-                allele_num = f"{allele_idx+1}"  # Fallback if any error occurs
+            allele_num = str(haplotype) if pd.notna(haplotype) else str(allele_idx + 1)
 
             # Store p-value in the arrays we created
             pvals[allele_pos] = p_value
@@ -326,12 +313,10 @@ def test_allelic_ratios_pairwise(adata, layer="unique_counts", test_condition="c
 
     counts = adata.layers[layer].copy()
 
-    if layer == "unique_counts":
-        allelic_ratio_counts = adata.layers["allelic_ratio_unique_counts"].copy()
-    elif layer == "em_counts":
-        allelic_ratio_counts = adata.layers["allelic_ratio_em_counts"].copy()
-    else:
-        raise ValueError("Layer must be either 'unique_counts' or 'em_counts'")
+    allelic_ratio_layer_name = 'allelic_ratio_' + layer
+    if allelic_ratio_layer_name not in adata.layers:
+        raise ValueError(f"Layer '{allelic_ratio_layer_name}' not found in AnnData object")
+    allelic_ratio_counts = adata.layers[allelic_ratio_layer_name].copy()
 
     cpm_layer_name = layer.replace('counts', 'cpm')
     cpm_counts = None
@@ -394,8 +379,7 @@ def test_allelic_ratios_pairwise(adata, layer="unique_counts", test_condition="c
 
         def get_haplotype_num(allele_pos_local):
             haplotype = adata.var['haplotype'].iloc[allele_indices[allele_pos_local]]
-            match = re.search(r'hap(\d+)', haplotype)
-            return match.group(1) if match else str(allele_pos_local + 1)
+            return str(haplotype) if pd.notna(haplotype) else str(allele_pos_local + 1)
 
         # Test all pairwise combinations of alleles
         for i, j in combinations(range(len(allele_indices)), 2):
@@ -525,7 +509,6 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
     """
     import pandas as pd
     import numpy as np
-    import re
     from statsmodels.stats.multitest import multipletests
     from isotools._transcriptome_stats import betabinom_lr_test
     from anndata import AnnData
@@ -550,9 +533,10 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
     counts = adata.layers[layer].copy()  # Create a copy to avoid modifying original
 
     # Ensure allelic ratio layer exists
-    if "allelic_ratio_unique_counts" not in adata.layers:
-        raise ValueError("Layer 'allelic_ratio_unique_counts' not found in AnnData object")
-    allelic_ratio_counts = adata.layers["allelic_ratio_unique_counts"].copy()
+    allelic_ratio_layer_name = 'allelic_ratio_' + layer
+    if allelic_ratio_layer_name not in adata.layers:
+        raise ValueError(f"Layer '{allelic_ratio_layer_name}' not found in AnnData object")
+    allelic_ratio_counts = adata.layers[allelic_ratio_layer_name].copy()
 
     # Get CPM data if available
     cpm_layer_name = layer.replace('counts', 'cpm')  # e.g., unique_counts -> unique_cpm
@@ -676,17 +660,7 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
             functional_annotation = functional_annotations.iloc[allele_pos]
 
             haplotype = adata.var['haplotype'].iloc[allele_indices[allele_idx]]
-            # Extract allele number from haplotype
-            try:
-                allele_match = re.search(r'hap(\d+)', haplotype)  # Capture the number
-                if allele_match:
-                    allele_num = allele_match.group(1)  # Get the captured number directly
-                else:
-                    allele_num = f"{allele_idx+1}"  # Fallback if regex fails
-                    print(f"No match found, using fallback: {allele_num}")
-            except Exception as e:
-                print(f"Error: {e}")
-                allele_num = f"{allele_idx+1}"  # Fallback if any error occurs
+            allele_num = str(haplotype) if pd.notna(haplotype) else str(allele_idx + 1)
 
             # Store p-value in the arrays we created
             pvals[allele_pos] = p_value

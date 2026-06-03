@@ -75,7 +75,7 @@ def filter_low_expressed_genes(
     adata: ad.AnnData,
     min_expression: Union[float, Dict[str, float], Callable[[float], float]] = 1.0,
     library_size_dependent: bool = False,
-    lib_size_normalization: Optional[str] = 'cpm', # Options: 'cpm', 'rpkm', 'tpm', None
+    lib_size_normalization: Optional[str] = None, # Options: 'cpm', None
     layer: Optional[str] = None,
     group_col: Union[str, Tuple[str, int]] = 'Synt_id',
     group_source: str = 'var',
@@ -100,7 +100,7 @@ def filter_low_expressed_genes(
           (e.g., lambda lib_size: lib_size * 1e-6 for 0.0001% of lib size)
     library_size_dependent : bool, default=False
         If True, scale thresholds by library size for each sample
-    lib_size_normalization : str or None, default='cpm'
+    lib_size_normalization : str or None, default=None
         How to normalize for library size:
 
         - 'cpm': Counts Per Million (divide by lib_size/1e6)
@@ -140,9 +140,6 @@ def filter_low_expressed_genes(
     if mode not in ['any', 'all', 'mean']:
         raise ValueError("mode must be one of 'any', 'all', or 'mean'")
     
-    if library_size_dependent == False:
-        lib_size_normalization = None  # Ensure it's a boolean
-
     if lib_size_normalization not in ['cpm', None]:
         raise ValueError(f"Unsupported normalization method: {lib_size_normalization}, use 'cpm' or None")
 

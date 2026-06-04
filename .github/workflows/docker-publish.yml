@@ -1,7 +1,7 @@
 # .github/workflows/docker-publish.yml
 #
 # Builds and pushes the PolyASE Docker image to Docker Hub
-# whenever a new release is published on GitHub.
+# whenever a version tag (v*.*.*) is pushed.
 #
 # Required secrets (set in GitHub → Settings → Secrets → Actions):
 #   DOCKERHUB_USERNAME  – your Docker Hub username (nadjano)
@@ -11,8 +11,9 @@
 name: Publish Docker image
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v*.*.*"
 
 jobs:
   build-and-push:

@@ -1742,7 +1742,13 @@ def test_differential_isoform_structure(
             print(f"  {reason}: {count}")
     
     if len(results_df) > 0:
-        results_df['FDR'] = multipletests(results_df['p_value'], method='fdr_bh')[1]
+        results_df['FDR'] = np.nan
+        valid_pvals = results_df['p_value'].notna()
+        n_dropped = (~valid_pvals).sum()
+        if n_dropped > 0:
+            print(f"Warning: {n_dropped} comparisons had NaN p-values (failed model fit) and were excluded from FDR correction")
+        if valid_pvals.any():
+            results_df.loc[valid_pvals, 'FDR'] = multipletests(results_df.loc[valid_pvals, 'p_value'], method='fdr_bh')[1]
         results_df_sig = results_df[(results_df['FDR'] < FDR_cutoff) & (results_df['ratio_difference'] > ratio_diff_cutoff)]
         results_df_sig_grouped = results_df_sig.groupby('Synt_id').agg({
             'FDR': list,

@@ -1618,3 +1618,181 @@ def plot_allele_specific_isoform_structure(
 
     print(f"Generated {len(figures)} plots for allele-specific isoform structure")
     return figures
+
+
+def plot_expression(
+    adata,
+    query,
+    id_type='Synt_id',
+    layer='unique_counts',
+    group_key='condition',
+    aggregate=None,
+    include=None,
+    ax=None,
+    figsize=None,
+    palette=None,
+    jitter=0.2,
+    alpha=0.8,
+    output_file=None,
+):
+    """
+    Plot per-replicate expression values for all transcripts matching a query,
+    with isoforms on the x-axis and condition as hue.
+
+    Parameters
+    ----------
+    adata : AnnData
+        AnnData object containing expression data.
+    query : str
+        Identifier value to look up (e.g. a Synt_id, gene_id, or transcript_id).
+    id_type : str, default='Synt_id'
+        Where to match ``query``. Use any column name present in ``adata.var``
+        ('Synt_id', 'gene_id', 'transcript_id', …) or ``'var_names'`` to match
+        the AnnData variable index directly.
+    layer : str, default='unique_counts'
+        Layer to use for expression values.
+    group_key : str, default='condition'
+        Column in ``adata.obs`` that contains condition labels.
+    aggregate : str or None, default=None
+        If ``'sum'`` or ``'mean'``, collapse all matching transcripts per sample
+        into a single value before plotting (one x-tick for the whole query).
+        If ``None``, each transcript is shown as a separate x-tick.
+    include : list of str or None, default=None
+        Subset of transcript names (``adata.var_names``) to plot. If ``None``,
+        all transcripts matching ``query`` are shown.
+    ax : matplotlib.axes.Axes or None, default=None
+        Existing axes to draw into. When provided, no new figure is created and
+        ``figsize`` / layout rescaling are ignored — the caller controls layout.
+    figsize : tuple or None, default=None
+        Figure size. Defaults to ``(max(6, 2 * n_transcripts), 4)`` when
+        ``aggregate=None``, or ``(4, 4)`` when aggregating.
+    palette : dict or None, default=None
+        Colour palette mapping condition names to colours.
+    jitter : float, default=0.2
+        Strip-plot jitter width.
+    alpha : float, default=0.8
+        Point transparency.
+    output_file : str or None, default=None
+        If given, save the figure to this path.
+
+    Returns
+    -------
+    matplotlib.figure.Figure or None
+    """
+    import numpy as np
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    # ── validate ─────────────────────────────────────────────────────────────
+    if layer not in adata.layers:
+        raise ValueError(f"Layer '{layer}' not found in AnnData object.")
+    if group_key not in adata.obs:
+        raise ValueError(f"'{group_key}' not found in adata.obs.")
+    if aggregate is not None and aggregate not in ('sum', 'mean'):
+        raise ValueError(f"aggregate must be 'sum', 'mean', or None, got '{aggregate}'.")
+
+    # ── find matching transcripts ────────────────────────────────────────────
+    if id_type == 'var_names':
+        mask = adata.var_names == query
+    elif id_type in adata.var.columns:
+        mask = adata.var[id_type] == query
+    else:
+        raise ValueError(
+            f"id_type '{id_type}' is not 'var_names' and not a column in adata.var. "
+            f"Available columns: {list(adata.var.columns)}"
+        )
+
+    indices = np.where(mask)[0]
+    if len(indices) == 0:
+        print(f"No transcripts found for {id_type}='{query}'.")
+        return None
+
+    if include is not None:
+        include_set = set(include)
+        indices = np.array([i for i in indices if adata.var_names[i] in include_set])
+        if len(indices) == 0:
+            print(f"No transcripts remain after filtering with include={include}.")
+            return None
+
+    # ── build tidy dataframe ─────────────────────────────────────────────────
+    counts = adata.layers[layer]
+    if hasattr(counts, 'toarray'):
+        counts = counts.toarray()
+
+    conditions = adata.obs[group_key].values
+    sample_names = adata.obs_names.tolist()
+
+    rows_list = []
+    for pos in indices:
+        transcript_name = adata.var_names[pos]
+        for sample_idx, (sample, cond) in enumerate(zip(sample_names, conditions)):
+            rows_list.append({
+                'transcript': transcript_name,
+                'sample': sample,
+                'condition': cond,
+                'value': counts[sample_idx, pos],
+            })
+
+    plot_df = pd.DataFrame(rows_list)
+
+    # ── aggregate across transcripts if requested ────────────────────────────
+    if aggregate is not None:
+        agg_fn = plot_df.groupby(['sample', 'condition'])['value']
+        plot_df = (agg_fn.sum() if aggregate == 'sum' else agg_fn.mean()).reset_index()
+        plot_df['transcript'] = query
+        y_label = f"{layer.replace('_', ' ')} ({aggregate})"
+    else:
+        y_label = layer.replace('_', ' ')
+
+    # when aggregated: condition goes on x-axis; otherwise transcripts on x with condition as hue
+    if aggregate is not None:
+        x_col, hue_col, dodge = 'condition', None, False
+        n_x = plot_df['condition'].nunique()
+    else:
+        x_col, hue_col, dodge = 'transcript', 'condition', True
+        n_x = plot_df['transcript'].nunique()
+
+    # ── figure ───────────────────────────────────────────────────────────────
+    own_figure = ax is None
+    if own_figure:
+        # figsize = desired PLOT AREA size; total figure expands to fit labels/legend
+        if figsize is None:
+            figsize = (max(4, 1.5 * n_x), 4) if aggregate is not None else (max(6, 2 * n_x), 4)
+        fig, ax = plt.subplots()
+    else:
+        fig = ax.get_figure()
+
+    sns.boxplot(
+        data=plot_df, x=x_col, y='value', hue=hue_col,
+        palette=palette, ax=ax, linewidth=1.5,
+        fliersize=0, width=0.5,
+    )
+    sns.stripplot(
+        data=plot_df, x=x_col, y='value', hue=hue_col,
+        ax=ax, color='black',
+        jitter=jitter, alpha=alpha, size=6,
+        dodge=dodge, legend=False,
+    )
+
+    ax.set_title(f"{query}", fontsize=10)
+    ax.set_xlabel('')
+    ax.set_ylabel(y_label)
+    ax.tick_params(axis='x', rotation=45)
+    if aggregate is None:
+        ax.legend(title=group_key, bbox_to_anchor=(1.01, 1), loc='upper left', borderaxespad=0)
+
+    if own_figure:
+        # Rescale figure so the axis is exactly figsize (labels expand figure, not shrink plot).
+        fig.tight_layout(pad=1.0)
+        fig_w, fig_h = fig.get_size_inches()
+        ax_pos = ax.get_position()
+        fig.set_size_inches(
+            fig_w * figsize[0] / (fig_w * ax_pos.width),
+            fig_h * figsize[1] / (fig_h * ax_pos.height),
+        )
+
+    if output_file:
+        fig.savefig(output_file, bbox_inches='tight')
+
+    return fig

@@ -647,6 +647,8 @@ def test_allelic_ratios_between_conditions(adata, layer="unique_counts", group_k
             try:
                 test_result = betabinom_lr_test(allele_counts, condition_total)
                 p_value, ratio_stats = test_result[0], test_result[1]
+                if len(ratio_stats) < 3:
+                    continue
 
                 # Calculate absolute difference in mean ratios between conditions
                 ratio_difference = abs(ratio_stats[0] - ratio_stats[2])
@@ -822,7 +824,11 @@ def test_pairwise_allele_response_between_conditions(adata, layer="unique_counts
     gene_ids = adata.var_names
     transcript_ids = adata.var['transcript_id']
     haplotypes = adata.var['haplotype']
-    functional_annotations = adata.var.get("functional_annotation", None)
+    if "functional_annotation" in adata.var:
+        functional_annotations = adata.var["functional_annotation"]
+    else:
+        functional_annotations = None
+        print("No functional annotations found in adata.var, functional_annotation columns will be 'Missing annotation'.")
 
     conditions = adata.obs[group_key].values
     unique_conditions = np.unique(conditions)
@@ -860,6 +866,16 @@ def test_pairwise_allele_response_between_conditions(adata, layer="unique_counts
             pos_i = allele_indices[idx_i]
             pos_j = allele_indices[idx_j]
 
+            # Ensure the allele with the smaller haplotype number is always "i"
+            hap_i = _parse_hap(haplotypes.iloc[pos_i], str(idx_i + 1))
+            hap_j = _parse_hap(haplotypes.iloc[pos_j], str(idx_j + 1))
+            try:
+                if int(hap_i) > int(hap_j):
+                    pos_i, pos_j = pos_j, pos_i
+                    idx_i, idx_j = idx_j, idx_i
+            except ValueError:
+                pass
+
             # Build per-condition count arrays for allele i and total (i+j)
             allele_counts_i = []
             totals_ij = []
@@ -895,11 +911,9 @@ def test_pairwise_allele_response_between_conditions(adata, layer="unique_counts
                 'ratio_difference': ratio_difference,
                 f'ratio_{cond0}': ratio_stats[0],
                 f'ratio_{cond1}': ratio_stats[2],
+                'functional_annotation_i': functional_annotations.iloc[pos_i] if functional_annotations is not None else 'Missing annotation',
+                'functional_annotation_j': functional_annotations.iloc[pos_j] if functional_annotations is not None else 'Missing annotation',
             }
-
-            if functional_annotations is not None:
-                result_dict['functional_annotation_i'] = functional_annotations.iloc[pos_i]
-                result_dict['functional_annotation_j'] = functional_annotations.iloc[pos_j]
 
             # Per-replicate allelic ratios for each allele in each condition
             if allelic_ratio_counts is not None:
@@ -1189,85 +1203,76 @@ def test_isoform_DIU_between_conditions(adata, layer="unique_counts", group_key=
                                            where=condition_gene_totals!=0)
                 isoform_ratios_per_condition[condition] = condition_ratios
 
-            # Check for zero counts before running the test
-            all_isoform_counts = np.concatenate(isoform_counts)
-            all_gene_totals = np.concatenate(gene_total_counts)
-
-            if np.any(all_isoform_counts == 0) or np.any(all_gene_totals == 0) or np.all(all_isoform_counts == 0) or np.all(all_gene_totals == 0):
-                no_counts_isoform = no_counts_isoform + 1
-                continue
-
-            # Handle different replicate numbers by padding shorter arrays
-            max_replicates = max(len(arr) for arr in isoform_counts)
-
-            # Pad arrays to have the same length
-            padded_isoform_counts = []
-            padded_gene_total_counts = []
-
-            for i, (iso_counts, total_counts) in enumerate(zip(isoform_counts, gene_total_counts)):
-                if len(iso_counts) < max_replicates:
-                    # Calculate the mean for padding (to maintain the same statistical properties)
-                    iso_mean = np.mean(iso_counts) if len(iso_counts) > 0 else 0
-                    total_mean = np.mean(total_counts) if len(total_counts) > 0 else 0
-
-                    # Pad with mean values
-                    padded_iso = np.concatenate([iso_counts,
-                                               np.full(max_replicates - len(iso_counts), iso_mean)])
-                    padded_total = np.concatenate([total_counts,
-                                                 np.full(max_replicates - len(total_counts), total_mean)])
-                else:
-                    padded_iso = iso_counts
-                    padded_total = total_counts
-
-                padded_isoform_counts.append(padded_iso.astype(int)) # to integer for testing function
-                padded_gene_total_counts.append(padded_total.astype(int))
-
-            # Run the beta-binomial likelihood ratio test
-            try:
-                test_result = betabinom_lr_test(padded_isoform_counts, padded_gene_total_counts)
-                p_value, ratio_stats = test_result[0], test_result[1]
-
-                # Calculate absolute difference in mean ratios between conditions
-                ratio_difference = abs(ratio_stats[0] - ratio_stats[2])
-            except Exception as e:
-                print(f"Error testing gene {gene_id}, isoform {isoform_idx}: {str(e)}")
-                continue
-
             # Get transcript ID
             transcript_id = transcript_ids[isoform_pos]
-            functional_annotation = functional_annotations.iloc[isoform_pos]
+            functional_annotation = functional_annotations.iloc[isoform_pos] if hasattr(functional_annotations, 'iloc') else functional_annotations
 
-            # Store p-value in the arrays we created
-            pvals[isoform_pos] = p_value
-            ratio_diff[isoform_pos] = ratio_difference
-            mean_ratio_cond1[isoform_pos] = ratio_stats[0]
-            mean_ratio_cond2[isoform_pos] = ratio_stats[2]
+            # Check for zero counts — only skip the statistical test, not plotting
+            all_isoform_counts = np.concatenate(isoform_counts)
+            all_gene_totals = np.concatenate(gene_total_counts)
+            skip_test = np.any(all_isoform_counts == 0) or np.any(all_gene_totals == 0)
 
-            # Store results
-            results.append({
-                'transcript_id': transcript_id,
-                'isoform_number': isoform_idx + 1,
-                'gene_id': gene_id,
-                'functional_annotation': functional_annotation,
-                'p_value': p_value,
-                'ratio_difference': ratio_difference,
-                'n_isoforms': len(isoform_indices),
-                f'ratios_{unique_conditions[0]}_mean': np.mean(isoform_ratios_per_condition[unique_conditions[0]][gene_total_counts[0] > 0]),
-                f'ratios_rep_{unique_conditions[0]}': isoform_ratios_per_condition[unique_conditions[0]],
-                f'ratios_{unique_conditions[1]}_mean': np.mean(isoform_ratios_per_condition[unique_conditions[1]][gene_total_counts[1] > 0]),
-                f'ratios_rep_{unique_conditions[1]}': isoform_ratios_per_condition[unique_conditions[1]]
-            })
+            p_value = np.nan
+            ratio_difference = np.nan
 
-            # Create plotting results table - one row per replicate, condition, ratio, transcript
+            if not skip_test:
+                # Handle different replicate numbers by padding shorter arrays
+                max_replicates = max(len(arr) for arr in isoform_counts)
+                padded_isoform_counts = []
+                padded_gene_total_counts = []
+
+                for i, (iso_counts, total_counts) in enumerate(zip(isoform_counts, gene_total_counts)):
+                    if len(iso_counts) < max_replicates:
+                        iso_mean = np.mean(iso_counts) if len(iso_counts) > 0 else 0
+                        total_mean = np.mean(total_counts) if len(total_counts) > 0 else 0
+                        padded_iso = np.concatenate([iso_counts,
+                                                   np.full(max_replicates - len(iso_counts), iso_mean)])
+                        padded_total = np.concatenate([total_counts,
+                                                     np.full(max_replicates - len(total_counts), total_mean)])
+                    else:
+                        padded_iso = iso_counts
+                        padded_total = total_counts
+                    padded_isoform_counts.append(padded_iso.astype(int))
+                    padded_gene_total_counts.append(padded_total.astype(int))
+
+                try:
+                    test_result = betabinom_lr_test(padded_isoform_counts, padded_gene_total_counts)
+                    p_value, ratio_stats = test_result[0], test_result[1]
+                    if len(ratio_stats) >= 3:
+                        ratio_difference = abs(ratio_stats[0] - ratio_stats[2])
+                        pvals[isoform_pos] = p_value
+                        ratio_diff[isoform_pos] = ratio_difference
+                        mean_ratio_cond1[isoform_pos] = ratio_stats[0]
+                        mean_ratio_cond2[isoform_pos] = ratio_stats[2]
+                        results.append({
+                            'transcript_id': transcript_id,
+                            'isoform_number': isoform_idx + 1,
+                            'gene_id': gene_id,
+                            'functional_annotation': functional_annotation,
+                            'p_value': p_value,
+                            'ratio_difference': ratio_difference,
+                            'n_isoforms': len(isoform_indices),
+                            f'ratios_{unique_conditions[0]}_mean': np.mean(isoform_ratios_per_condition[unique_conditions[0]][gene_total_counts[0] > 0]),
+                            f'ratios_rep_{unique_conditions[0]}': isoform_ratios_per_condition[unique_conditions[0]],
+                            f'ratios_{unique_conditions[1]}_mean': np.mean(isoform_ratios_per_condition[unique_conditions[1]][gene_total_counts[1] > 0]),
+                            f'ratios_rep_{unique_conditions[1]}': isoform_ratios_per_condition[unique_conditions[1]]
+                        })
+                    else:
+                        p_value = np.nan
+                        ratio_difference = np.nan
+                except Exception as e:
+                    print(f"Error testing gene {gene_id}, isoform {isoform_idx}: {str(e)}")
+                    p_value = np.nan
+                    ratio_difference = np.nan
+            else:
+                no_counts_isoform += 1
+
+            # Always add to plotting results so all isoforms appear in the expression matrix
             for condition in unique_conditions:
                 condition_indices = np.where(conditions == condition)[0]
                 sample_names = adata.obs_names[condition_indices]
                 ratios = isoform_ratios_per_condition[condition]
-
-                # Get CPM values for this isoform in this condition
                 isoform_cpm_values = cpm[condition_indices, isoform_pos]
-
-                # Get raw counts for this isoform in this condition
                 isoform_count_values = counts[condition_indices, isoform_pos]
 
                 for rep_idx, (sample_name, ratio_value, cpm_value, count_value) in enumerate(zip(sample_names, ratios, isoform_cpm_values, isoform_count_values)):
@@ -1280,7 +1285,7 @@ def test_isoform_DIU_between_conditions(adata, layer="unique_counts", group_key=
                         'replicate': rep_idx + 1,
                         'sample_name': sample_name,
                         'isoform_ratio': ratio_value,
-                        f'{layer}_raw': count_value,  # Raw counts
+                        f'{layer}_raw': count_value,
                         f'{layer}_cpm': cpm_value,
                         'p_value': p_value,
                         'ratio_difference': ratio_difference,
